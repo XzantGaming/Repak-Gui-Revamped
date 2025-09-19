@@ -2,21 +2,6 @@
 
 Nothing Yet!
 
-# Version 2.6.2 (2025-09-19)
-
-## Fixes
-- Add restart prompt after changing the Mod folder directory so newly loaded mods appear correctly.
-- Persist the selected Mod folder path immediately on change and before exit; restore it at startup so the path shows after restart.
-
-## UX
-- Debounce path edits: only commit on field focus loss (to avoid repeated prompts while typing).
-
-# Version 2.6.1 (2025-09-19)
-
-## Changes
-- Bug fixes and stability improvements
-- More thorough Tag customization across the application
-
 # Version 2.6.0 (2025-09-19)
 
 ## Highlights

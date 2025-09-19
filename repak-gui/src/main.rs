@@ -162,6 +162,8 @@ struct RepakModManager {
     deleting_mods: std::collections::HashSet<std::path::PathBuf>,
     #[serde(skip)]
     pending_remove_paths: Vec<std::path::PathBuf>,
+    #[serde(skip)]
+    pending_restart: bool,
 }
 
 impl Default for RepakModManager {
@@ -210,6 +212,7 @@ impl Default for RepakModManager {
             delete_results: None,
             deleting_mods: std::collections::HashSet::new(),
             pending_remove_paths: Vec::new(),
+            pending_restart: false,
         }
     }
 }
@@ -1747,6 +1750,8 @@ impl RepakModManager {
             info!("Loading config: {}", path.to_string_lossy());
             let data = fs::read_to_string(path)?;
             let mut config: Self = serde_json::from_str(&data)?;
+            // Ensure the editable text field reflects the saved path after restart
+            config.game_path_input = config.game_path.to_string_lossy().to_string();
 
             debug!("Setting custom style");
             setup_custom_style(&ctx.egui_ctx);
@@ -2013,14 +2018,27 @@ impl RepakModManager {
                     TextEdit::singleline(&mut self.game_path_input)
                         .hint_text("Type or paste a path..."),
                 );
-                if resp.changed() {
-                    self.game_path = PathBuf::from(self.game_path_input.clone());
+                // Commit path when the field loses focus to avoid spamming while typing.
+                if resp.lost_focus() {
+                    let candidate = PathBuf::from(self.game_path_input.clone());
+                    if candidate != self.game_path && candidate.is_dir() {
+                        self.game_path = candidate;
+                        self.game_path_input = self.game_path.to_string_lossy().to_string();
+                        // Persist the new path so it is restored on next launch
+                        let _ = self.save_state();
+                        // Ask to restart so mods load correctly after changing the directory
+                        self.pending_restart = true;
+                    }
                 }
                 let browse_button = flex_ui.add(item(), Button::new("Browse").corner_radius(egui::CornerRadius::same(8)));
                 if browse_button.clicked() {
                     if let Some(path) = FileDialog::new().pick_folder() {
                         self.game_path = path;
                         self.game_path_input = self.game_path.to_string_lossy().to_string();
+                        // Persist the new path so it is restored on next launch
+                        let _ = self.save_state();
+                        // Ask to restart so mods load correctly after changing the directory
+                        self.pending_restart = true;
                     }
                 }
                 flex_ui.add_ui(item(), |ui| {
@@ -2061,6 +2079,22 @@ impl eframe::App for RepakModManager {
             let mut style = (*ctx.style()).clone();
             self.apply_custom_palette_to_style(&mut style);
             ctx.set_style(style);
+        }
+        // If the mod folder was changed, prompt to restart the app so mods load correctly
+        if self.pending_restart {
+            let result = rfd::MessageDialog::new()
+                .set_title("Restart required")
+                .set_description("The mod folder was changed. Restart Repak now to reload mods correctly?")
+                .set_buttons(MessageButtons::YesNo)
+                .show();
+            // Reset the flag to avoid repeated prompts
+            self.pending_restart = false;
+            if matches!(result, rfd::MessageDialogResult::Yes) {
+                // Persist current state (including new mod folder) before closing
+                let _ = self.save_state();
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                return;
+            }
         }
         if let Some(ref mut welcome) = self.welcome_screen{
             if !self.hide_welcome{
