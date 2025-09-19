@@ -1,3 +1,0 @@
-E:\WindsurfCoding\repak_rivals-remastered\repak-rivals-master\target\release\uassetbridge\UAssetBridge.pdb
-E:\WindsurfCoding\repak_rivals-remastered\repak-rivals-master\target\release\uassetbridge\UAssetAPI.pdb
-E:\WindsurfCoding\repak_rivals-remastered\repak-rivals-master\target\release\uassetbridge\UAssetBridge.exe

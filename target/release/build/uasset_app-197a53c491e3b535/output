@@ -1,4 +1,0 @@
-cargo:rerun-if-changed=E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\Program.cs
-cargo:rerun-if-changed=E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\UAssetBridge.csproj
-Using precompiled UAssetBridge from: E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\bin\Release\net8.0\win-x64\UAssetBridge.exe
-UAssetBridge copied to: E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\target\release\uassetbridge\UAssetBridge.exe
