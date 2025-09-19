@@ -1,4 +1,45 @@
 # Ignore local test files and build artifacts for Repak_Gui-Revamped
+## Project subfolders
 Repak_Gui-Revamped/TestFiles/
 Repak_Gui-Revamped/target/
 Repak_Gui-Revamped/dist/
+
+## Rust/Cargo
+**/target/
+Cargo.lock
+
+## .NET builds (UAssetBridge)
+**/bin/
+**/obj/
+
+## VS/IDE
+.vs/
+.vscode/
+.idea/
+
+## OS cruft
+Thumbs.db
+.DS_Store
+
+## Logs and caches
+*.log
+**/.cache/
+
+## Binaries and archives (do not track large generated files)
+*.exe
+*.dll
+*.pdb
+*.zip
+*.7z
+*.rar
+*.tar
+*.tar.gz
+
+## Tool-specific build outputs
+uasset_toolkit/tools/UAssetBridge/bin/
+uasset_toolkit/tools/UAssetBridge/obj/
+uasset_toolkit/tools/UAssetBridge/Release/
+uasset_toolkit/tools/UAssetBridge/Debug/
+
+## Misc
+vs_buildtools.exe
