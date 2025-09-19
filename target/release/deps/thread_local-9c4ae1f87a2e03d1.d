@@ -1,0 +1,10 @@
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\target\release\deps\thread_local-9c4ae1f87a2e03d1.d: C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.8\src\lib.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.8\src\cached.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.8\src\thread_id.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.8\src\unreachable.rs
+
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\target\release\deps\libthread_local-9c4ae1f87a2e03d1.rlib: C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.8\src\lib.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.8\src\cached.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.8\src\thread_id.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.8\src\unreachable.rs
+
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\target\release\deps\libthread_local-9c4ae1f87a2e03d1.rmeta: C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.8\src\lib.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.8\src\cached.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.8\src\thread_id.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.8\src\unreachable.rs
+
+C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.8\src\lib.rs:
+C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.8\src\cached.rs:
+C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.8\src\thread_id.rs:
+C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thread_local-1.1.8\src\unreachable.rs:

@@ -1,0 +1,11 @@
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\target\release\deps\libc-51bf7a125446735c.d: C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\lib.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\macros.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\primitives.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\windows\mod.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\windows\msvc\mod.rs
+
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\target\release\deps\liblibc-51bf7a125446735c.rlib: C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\lib.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\macros.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\primitives.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\windows\mod.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\windows\msvc\mod.rs
+
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\target\release\deps\liblibc-51bf7a125446735c.rmeta: C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\lib.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\macros.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\primitives.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\windows\mod.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\windows\msvc\mod.rs
+
+C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\lib.rs:
+C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\macros.rs:
+C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\primitives.rs:
+C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\windows\mod.rs:
+C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.170\src\windows\msvc\mod.rs:

@@ -1,0 +1,13 @@
+[package]
+name = "oodle_loader"
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+libloading = "0.8"
+hex = { workspace = true }
+sha2 = "0.10.8"
+thiserror = "2.0.11"

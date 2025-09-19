@@ -1,0 +1,289 @@
+**1011 - Hulk :**
+    ↳ 1011100 - Mighty G-Bomb
+      ↳ 1011500 - Punk Rage
+        ↳ 1011501 - Green Scar
+          ↳ 1011502 - Joe Fixit
+
+**1014 - Punisher :**
+    ↳ 1014100 - Camo
+      ↳ 1014300 - Dangan Ronin
+        ↳ 1014500 - Thunderbolts
+          ↳ 1014501 - Punisher 2099
+
+**1015 - Storm :**
+    ↳ 1015100 - Ivory Breeze
+      ↳ 1015500 - Mohawk Rock
+        ↳ 1015501 - Ultimate Wind-Rider
+          ↳ 1015502 - Goddess of Thunder
+
+
+**1016 - Loki :**
+    ↳ 1016100 - Frost Giant
+      ↳ 1016300 - Shin Sagi-Shi
+        ↳ 1016500 - Presidential Attire
+          ↳ 1016501 - All-Butcher
+            ↳ 1016800 - Loki Season 2
+
+**1017 - Human Torch :**
+    ↳  1017100 - First Family
+      ↳ 1017101 - Blood Blaze
+        ↳ 1017500 - Negative Zone Gladiator
+
+**1018 - Doctor Strange:**
+    ↳ 1018100 - Master of Black Magic
+      ↳ 1018300 - Sorcerer Immortal
+        ↳ 1018500 - God Of Magic
+          ↳ 1018501 - Sorcerer Supreme of the Galaxy
+            ↳ 1018800 - Doctor Strange in the Multiverse of Madness
+
+**1020 - Mantis :**
+    ↳ 1020100 - Knowhere Corp
+      ↳ 1020300 - Galactic Wings
+        ↳ 1020301 - Jade Maiden
+          ↳ 1020500 - Flora Maiden
+            ↳ 1020800 - Guardians of the Galaxy Vol. 3
+
+
+**1021 - Hawkeye :**
+    ↳ 1021100 - Tiger's Eye
+      ↳ 1021300 - Galactic Fangs
+        ↳ 1021500 - Ronin
+          ↳ 1021501 - Freefall
+            ↳ 1021502 - Binary Arrow
+
+**1022 - Captain America :**
+    ↳ 1022100 - Captain A.I.M.erica
+      ↳ 1022300 - Galactic Talon
+        ↳ 1022500 - Captain Gladiator
+          ↳ 1022501 - Star Spangled Style
+            ↳ 1022801 - Avengers: Infinity War
+
+**1023 - Rocket Raccoon :**
+    ↳ 1023100 - Rocky
+      ↳ 1023300 - Bounty Hunter
+        ↳ 1023301 - Wild Winter
+          ↳ 1023302 - Sunshine Raccoon
+            ↳ 1023801 - Guardians of the Galaxy Vol. 3
+
+**1024 - Hela :**
+    ↳ 1024100 - Ultimate
+      ↳ 1024101 - Will of Galacta
+        ↳ 1024300 - PLACEHOLDER SKIN
+          ↳ 1024301 - Empress of the Cosmos
+            ↳ 1024302 - Yami no Karasu
+              ↳ 1024500 - Goddess of Death
+
+**1025 - Cloak & Dagger :**
+    ↳ 1025100 - Lemon Lime
+      ↳ 1025300 - Dance Partner
+        ↳ 1025500 - Growth & Decay
+          ↳ 1025301 - Twilight Duo
+
+**1026 - Black Panther :**
+    ↳ 1026100 - Orisha Blood
+      ↳ 1026300 - Galactic Claw
+        ↳ 1026301 - Thrice-Cursed King
+          ↳ 1026500 - Bast's Chose
+            ↳ 1026501 -  Damisa-Sarki
+
+**1027 - Groot :**
+    ↳ 1027100 - Abies Algae
+      ↳ 1027300 - PLACEHOLDER SKIN (Lore Entry)
+        ↳ 1027301 - Yggroot
+          ↳ 1027302 - Holiday Happiness
+            ↳ 1027500 - Carved Traveler
+              ↳ 1027800 - Guardians of the Galaxy Vol. 3
+
+**1028 - Ultron :**
+    ↳ 1028100 - Mechanical Phantom 
+      ↳ 1028102 - Golden Ultron
+        ↳ 1028500 - X-Tron
+
+**1029 - Magik :**
+    ↳ 1029100 - Amethyst Armor
+      ↳ 1029300 - Punkchild
+        ↳ 1029301 - Frozen Demon
+          ↳ 1029302 - Rosy Resilience (Punkchild)
+            ↳ 1029500 - Eldritch Armor
+              ↳ 1029501 - Retro X-Uniform
+
+**1030 - Moon Knight :**
+    ↳ 1030100 - Golden Moonlight
+      ↳ 1030101 - Blood Moon Knight
+        ↳ 1030300 - Lunar General
+          ↳ 1030500 - Mister Knight
+            ↳ 1030800 - Fist of Vengeance
+
+**1031 - Luna Snow :**
+    ↳ 1031100 - Minty Beats
+      ↳ 1031300 - Shining Star
+        ↳ 1031301 - Mirae 2099
+          ↳ 1031302 - Nolaehaneun Manyeo
+            ↳ 1031303 - PLACEHOLDER SKIN
+              ↳ 1031304 - Plasma Pulse (Mirae 2099)
+
+**1032 - Squirrel Girl :**
+    ↳ 1032100 - Arctic Lemmus
+      ↳ 1032300 - Nut Rocker
+        ↳ 1032301 - Cheerful Dragoness
+          ↳ 1032302 - Sunshine Squirrel
+            ↳ 1032500 - Urban Hunter
+
+
+**1033 - Black Widow :**
+    ↳ 1033100 - Lethal Toxicity
+      ↳ 1033300 - Lion's Heartbeat
+        ↳ 1033500 - Red Runway Veil
+          ↳ 1033501 - Mrs. Barnes
+            ↳ 1033800 - White Suit
+
+**1034 - Iron Man :**
+    ↳ 1034100 - Armor Model 42
+      ↳ 1034300 - PLACEHOLDER SKIN
+        ↳ 1034301 - Blood Edge Armor
+          ↳ 1034500 - Steam Power
+            ↳ 1034501 - Superior Iron Man
+              ↳ 1034800 - Avengers: Endgame
+
+**1035 - Venom :**
+    ↳ 1035100 - Cyan Clash
+      ↳ 1035101 - Anti-Venom
+        ↳ 1035102 - Hyper Orange
+          ↳ 1035300 - Snow Symbiote
+            ↳ 1035500 - Lingering Imprint`
+              ↳ 1035501 - Space Knight
+
+
+**1036 - Spider-Man :**
+    ↳ 1036100 - Scarlet Spider
+      ↳ 1036101 - Chasm
+        ↳ 1036300 - Spider-Oni
+          ↳ 1036500 - 2099: Spider-Punk
+            ↳ 1036501 - Bag-Man Beyond
+              ↳ 1036502 - Future Foundation
+                ↳ 1036503 - Marvel's Spider-Man 2 
+                  ↳ 1036800 - Spider-Man: No Way Home
+
+
+**1037 - Magneto :**
+    ↳ 1037100 - Uncanny Blacksteel
+      ↳ 1037101 - Will of Galacta
+        ↳ 1037300 - Binary Sword
+          ↳ 1037500 - Master of Magnetism
+            ↳ 1037501 - King Magnus
+
+**1038 - Scarlet Witch :**
+    ↳ 1038100 - White Witch
+      ↳ 1038101 - Nyx Weaver
+        ↳  1038300 - Immortal Sovereign
+          ↳ 1038500 - Chaos Gown
+            ↳ 1038501 - Emporium Matron
+              ↳ 1038800 - Doctor Strange in the Multiverse of Madness
+
+**1039 - Thor :**
+    ↳ 1039100 - Midgard Umber
+      ↳ 1039500 - Herald of Thunder
+        ↳ 1039501 - Reborn from Ragnarok
+          ↳ 1039502 - Lord of Asgard
+            ↳ 1039800 - Thor: Love and Thunder
+
+**1040 - Mister Fantastic :**
+    ↳ 1040100 - First Family
+      ↳ 1040300 - The Life Fantastic
+        ↳ 1040500 - The Maker
+          ↳ 1040501 - Future Foundation
+
+**1041 - Winter Soldier :**
+    ↳ 1041100 - Navy Trooper
+      ↳ 1041300 - Blood Soldier
+        ↳ 1041301 - PLACEHOLDER SKIN
+          ↳ 1041302 - Winter's Wraith (Blood Soldier)
+            ↳ 1041500 - Revolution
+              ↳ 1041800 - Thunderbolts\*
+
+**1042 - Peni Parker :**
+    ↳ 1042100 - Olive Skimmer
+      ↳ 1042101 - Blue Tarantula
+        ↳ 1042300 - Yatsukahagi
+          ↳ 1042500 - VEN#M
+
+**1043 - Star-Lord :**
+    ↳ 1043100 - Jovial Star
+      ↳ 1043300 - Lion's Mane
+        ↳ 1043500 - Master of the Sun
+          ↳ 1043501 - King of Spartax
+            ↳ 1043800 - Guardians of the Galaxy Vol. 3
+
+**1044 - Blade**
+
+**1045 - Namor :**
+    ↳ 1045100 - Mauve Sub-Mariner
+      ↳ 1045101 - Will of Galacta
+        ↳ 1045500 - Savage Sub-Mariner
+          ↳ 1045300 - Retro X-Uniform
+            ↳ 1045800 - Black Panther: Wakanda Forever
+
+**1046 - Adam Warlock :**
+    ↳ 1046100 - Cosmic Jade
+      ↳ 1046101 - Will of Galacta
+        ↳ 1046300 - Immortal Avatar
+          ↳ 1046301 - Blood Soul
+            ↳ 1046800 - Guardians of the Galaxy Vol. 3
+
+**1047 - Jeff the Landshark :**
+    ↳ 1047100 - Adopted Avenger
+      ↳ 1047300 - Cuddly Fuzzlefin
+        ↳ 1047500 - Incognito Dolphin
+
+**1048 - Psylocke :**
+    ↳ 1048100 - Kirisaki Sakura
+      ↳ 1048300 - Blood Kariudo
+        ↳ 1048500 - Vengeance
+          ↳ 1048501 - Retro X-Uniform
+            ↳ 1048502 - PLACEHOLDER SKIN (Hellfire Gala?)
+              ↳ 1048503 - Phantom Purple (Vengeance)
+
+**1049 - Wolverine :**
+    ↳ 1049100 - Lone Wolf
+      ↳ 1049300 - Blood Berserker
+        ↳ 1049500 - Patch
+          ↳ 1049800 - Deadpool & Wolverine
+
+**1050 - Invisible Woman :**
+    ↳ 1050100 - First Family
+      ↳ 1050101 - Blood Shield
+        ↳ 1050300 - The Life Fantastic
+          ↳ 1050500 - Malice
+            ↳ 1050500 - Future Foundation
+
+**1051 - The Thing :**
+    ↳ 1051100 - First Family
+      ↳ 1051101 - The Unlimited
+        ↳ 1051500 - Trench Coat
+          ↳ 1051500 - Future Foundation
+
+**1052 - Iron Fist :**
+    ↳ 1052100 - Martial Arts Savant
+      ↳ 1052300 - Lion's Gaze
+        ↳ 1052301 - Binary Fist
+          ↳ 1052500 - Sword Master
+            ↳ 1052501 - Immortal Weapon of Agamotto
+
+**1053 - Emma Frost :**
+    ↳ 1053100 - Blue Sapphire
+      ↳ 1053101 - Will of Galacta
+        ↳ 1053102 - Golden Diamond
+          ↳ 1053500 - X-Revolution
+
+**1054 - Phoenix**
+**1067 - Armor**
+**1068 - Hive**
+**1069 - White Fox**
+**1070 - Forge**
+**1071 - Amaranth**
+
+**4011 - Spider Zero**
+**4012 - Master Weaver**
+**4016 - Galacta Bot**
+**4017 - Galacta**
+**4018 - Galacta Bot (Large)**

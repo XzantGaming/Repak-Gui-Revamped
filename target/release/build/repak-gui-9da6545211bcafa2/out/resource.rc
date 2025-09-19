@@ -1,0 +1,26 @@
+#pragma code_page(65001)
+1 VERSIONINFO
+FILEOS 0x40004
+FILETYPE 0x1
+PRODUCTVERSION 2, 6, 0, 0
+FILEVERSION 2, 6, 0, 0
+FILEFLAGS 0x0
+FILESUBTYPE 0x0
+FILEFLAGSMASK 0x3f
+{
+BLOCK "StringFileInfo"
+{
+BLOCK "000004b0"
+{
+VALUE "FileDescription", "repak-gui"
+VALUE "FileVersion", "2.6.0"
+VALUE "ProductName", "repak-gui"
+VALUE "ProductVersion", "2.6.0"
+}
+}
+BLOCK "VarFileInfo" {
+VALUE "Translation", 0x0, 0x04b0
+}
+}
+1 ICON "icons/icon.ico"
+

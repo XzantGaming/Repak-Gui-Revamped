@@ -1,0 +1,45 @@
+[package]
+name = "repak-gui"
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+keywords.workspace = true
+version.workspace = true
+
+[package.metadata.wix]
+upgrade-guid = "3ABC116E-0858-4842-8C33-F213D7FA8A4B"
+path-guid = "0F727DCE-5DD6-48B8-9882-F9205826FCC0"
+license = false
+eula = false
+
+
+[dependencies]
+eframe = "0.31.1"
+egui_flex = "0.3.0"
+rfd = "0.15.2"
+log = "0.4.26"
+repak = { path = "../repak" ,features = ["oodle","encryption"]}
+hex.workspace = true
+egui_extras = { version = "0.31.0", features = ["all_loaders"] }
+sha2 = "0.10.9"
+serde = { version = "1.0.218", features = ["derive"] }
+uuid = { version = "1.0", features = ["v4"] }
+serde_json = "1.0.139"
+dirs = "6.0.0"
+tempfile = "3.17.1"
+path-clean = "1.0.1"
+path-slash = "0.2.1"
+rayon = "1.10.0"
+uasset-mesh-patch-rivals = {path = "../uasset-mesh-patch-rivals"}
+uasset_toolkit = { path = "../uasset_toolkit/uasset_app", package = "uasset_app" }
+colored = "3.0.0"
+notify = "8.0.0"
+simplelog = "0.12.2"
+regex-lite = "0.1.5"
+retoc = {path = "../retoc-rivals"}
+unrar = "0.5.8"
+zip = "2.6.1"
+walkdir = "2.5.0"
+[build-dependencies]
+winres = "0.1.12"

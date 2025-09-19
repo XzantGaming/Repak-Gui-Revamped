@@ -1,0 +1,1 @@
+cargo:rustc-env=MIME_TYPES_GENERATED_PATH=E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\target\release\build\mime_guess2-a27d732d6cfcd4fb\out\mime_types_generated.rs

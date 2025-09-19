@@ -1,0 +1,11 @@
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\target\release\deps\float_cmp-dbce3bcb757079b3.d: C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\lib.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\macros.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\ulps.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\ulps_eq.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\eq.rs
+
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\target\release\deps\libfloat_cmp-dbce3bcb757079b3.rlib: C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\lib.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\macros.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\ulps.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\ulps_eq.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\eq.rs
+
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\target\release\deps\libfloat_cmp-dbce3bcb757079b3.rmeta: C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\lib.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\macros.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\ulps.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\ulps_eq.rs C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\eq.rs
+
+C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\lib.rs:
+C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\macros.rs:
+C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\ulps.rs:
+C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\ulps_eq.rs:
+C:\Users\NIkolas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\eq.rs:
