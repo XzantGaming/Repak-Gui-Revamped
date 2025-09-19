@@ -47,11 +47,6 @@ Notes:
 - Texture warnings about `UAssetBridge.dll` missing: optional; place the DLL under `uassetbridge/` to enable the texture pipeline.
 - If a mod fails to load, share `target/release/latest.log` and the mod name so we can tailor fixes without disabling compression globally.
 
-## For modders
-- Advanced users can still build and use the underlying crates, but the recommended path is the GUI.
-- A packaging script `package_release.ps1` is provided to create a clean ZIP for releases.
-
-*If you like my support on this game consider [buying me a coffee](https://ko-fi.com/natimerry)*
 
 
 ## Acknowledgements
