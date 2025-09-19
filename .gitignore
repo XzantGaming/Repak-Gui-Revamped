@@ -1,0 +1,4 @@
+# Ignore local test files and build artifacts for Repak_Gui-Revamped
+Repak_Gui-Revamped/TestFiles/
+Repak_Gui-Revamped/target/
+Repak_Gui-Revamped/dist/
