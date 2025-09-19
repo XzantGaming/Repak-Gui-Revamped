@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::{fs, io};
+use std::fs;
 use log::{debug, warn, error};
 use uasset_mesh_patch_rivals::{process_mesh_file, is_mesh_uasset};
 

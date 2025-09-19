@@ -8,6 +8,10 @@ use crate::utoc_utils::read_utoc;
 use crate::{setup_custom_style, ICON};
 use eframe::egui;
 use eframe::egui::{Align, Checkbox, ComboBox, Context, Label, TextEdit};
+use std::collections::BTreeSet;
+use std::fs;
+use dirs;
+use serde_json::Value as JsonValue;
 use egui_extras::{Column, TableBuilder};
 use egui_flex::{item, Flex, FlexAlign};
 use install_mod_logic::install_mods_in_viewport;
@@ -23,7 +27,7 @@ use std::str::FromStr;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicBool, AtomicI32};
 use std::sync::{Arc, LazyLock};
-use std::{fs, thread};
+use std::thread;
 use tempfile::tempdir;
 use walkdir::WalkDir;
 
@@ -31,6 +35,8 @@ use walkdir::WalkDir;
 pub struct InstallableMod {
     pub mod_name: String,
     pub mod_type: String,
+    pub custom_tags: Vec<String>,
+    pub custom_tag_input: String,
     pub repak: bool,
     pub fix_mesh: bool,
     pub fix_textures: bool,
@@ -54,6 +60,8 @@ impl Default for InstallableMod {
         InstallableMod{
             mod_name: "".to_string(),
             mod_type: "".to_string(),
+            custom_tags: Vec::new(),
+            custom_tag_input: String::new(),
             repak: false,
             fix_mesh: false,
             fix_textures: false,
@@ -129,25 +137,16 @@ impl ModInstallRequest {
                 setup_custom_style(ctx);
                 egui::CentralPanel::default().show(ctx, |ui| {
                     ui.label("Mods to install");
-                    ui.set_min_width(ui.available_width());
-                    ui.set_min_height(ui.available_height());
                     
                     // Add filtering UI
                     self.show_filter_ui(ui);
                     ui.separator();
                     
-                    // ScrollArea::vertical()
-                    //     .auto_shrink([false, false])
-                    //     .show(ui, |ui| {
                     self.table_ui(ui);
-                    // });
                 });
                 egui::TopBottomPanel::bottom("bottom_panel")
                     .min_height(50.)
                     .show(ctx, |ui| {
-                        // ui.heading("WTF");
-                        ui.set_min_width(ui.available_width());
-                        ui.set_min_height(ui.available_height());
                         Flex::horizontal()
                             .align_items(FlexAlign::Center)
                             .w_auto()
@@ -298,25 +297,11 @@ impl ModInstallRequest {
                                 }
                                  
                                 ui.separator();
-                                ui.label("Or enter a custom tag:");
-                                ui.text_edit_singleline(&mut self.new_tag_input);
-                                 
-                                ui.horizontal(|ui| {
-                                    if ui.button("Apply Custom Tag").clicked() && !self.new_tag_input.is_empty() {
-                                        if let Some(mod_item) = self.mods.get_mut(mod_index) {
-                                            mod_item.mod_type = self.new_tag_input.clone();
-                                        }
-                                        self.show_unknown_tagging_dialog = false;
-                                        self.unknown_mod_being_tagged = None;
-                                        self.new_tag_input.clear();
-                                    }
-                                    
-                                    if ui.button("Cancel").clicked() {
-                                        self.show_unknown_tagging_dialog = false;
-                                        self.unknown_mod_being_tagged = None;
-                                        self.new_tag_input.clear();
-                                    }
-                                });
+                                if ui.button("Cancel").clicked() {
+                                    self.show_unknown_tagging_dialog = false;
+                                    self.unknown_mod_being_tagged = None;
+                                    self.new_tag_input.clear();
+                                }
                             }
                         }
                     });
@@ -331,7 +316,6 @@ impl ModInstallRequest {
 
         let table = TableBuilder::new(ui)
             .striped(true)
-            // .resizable(true)
             .cell_layout(egui::Layout::left_to_right(egui::Align::LEFT))
             .column(Column::auto())
             .column(Column::auto())
@@ -398,26 +382,51 @@ impl ModInstallRequest {
                                         egui::TextEdit::singleline(&mut mods.mod_name)
                                             .clip_text(true),
                                     );
+                                    // Proactively ensure the text edit has focus while editing
+                                    if !text_edit.has_focus() {
+                                        text_edit.request_focus();
+                                    }
+
+                                    let mut finish_edit = false;
+                                    let mut finished_now = false;
                                     if text_edit.lost_focus()
                                         || ui.input(|i| i.key_pressed(egui::Key::Enter))
                                     {
+                                        finish_edit = true;
+                                    }
+                                    // Render the confirm/edit button aligned to the right and
+                                    // coordinate with finish_edit state.
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if ui.button("✔").clicked() {
+                                                finish_edit = true;
+                                            }
+                                        },
+                                    );
+                                    if finish_edit {
+                                        // Explicitly release focus from the text field to avoid
+                                        // immediate re-triggering of edit state on the next frame.
+                                        text_edit.surrender_focus();
                                         mods.editing = false;
+                                        finished_now = true;
                                     }
                                 } else {
                                     ui.add(
                                         Label::new(&mods.mod_name).halign(Align::LEFT).truncate(),
                                     );
                                 }
-                                // align button right
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        if ui.button(if mods.editing { "✔" } else { "✏" }).clicked()
-                                        {
-                                            mods.editing = !mods.editing;
-                                        }
-                                    },
-                                );
+                                // align button right (only the edit button when not editing)
+                                if !mods.editing {
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if ui.button("✏").clicked() {
+                                                mods.editing = true;
+                                            }
+                                        },
+                                    );
+                                }
                             });
                         });
                         row.col(|ui| {
@@ -495,12 +504,97 @@ impl ModInstallRequest {
                                             "LZ4",
                                         );
                                     });
+
+                                ui.separator();
+                                ui.label("Custom Tags");
+                                // Show tag chips with remove buttons
+                                if !mods.custom_tags.is_empty() {
+                                    ui.horizontal_wrapped(|ui| {
+                                        let mut to_remove: Option<String> = None;
+                                        for t in &mods.custom_tags {
+                                            let resp = ui.add(egui::Button::new(format!("{} ✕", t)).small());
+                                            if resp.clicked() { to_remove = Some(t.clone()); }
+                                        }
+                                        if let Some(rem) = to_remove { mods.custom_tags.retain(|x| x != &rem); }
+                                    });
+                                }
+                                // Add from existing global tags (from config and pending)
+                                let existing_tags = read_global_custom_tags();
+                                if !existing_tags.is_empty() {
+                                    ComboBox::new(format!("existing_tag_picker_{}", rowidx), "Add existing")
+                                        .selected_text("Select tag")
+                                        .show_ui(ui, |ui| {
+                                            for t in &existing_tags {
+                                                if ui.selectable_label(false, t).clicked() {
+                                                    if !mods.custom_tags.contains(t) {
+                                                        mods.custom_tags.push(t.clone());
+                                                        mods.custom_tags.sort();
+                                                        mods.custom_tags.dedup();
+                                                    }
+                                                }
+                                            }
+                                        });
+                                }
+
+                                ui.horizontal(|ui| {
+                                    let resp = ui.add(TextEdit::singleline(&mut mods.custom_tag_input).hint_text("Add tag"));
+                                    let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                    if (enter || ui.button("Add").clicked()) && !mods.custom_tag_input.trim().is_empty() {
+                                        let tag = mods.custom_tag_input.trim().to_string();
+                                        if !mods.custom_tags.contains(&tag) {
+                                            mods.custom_tags.push(tag);
+                                            mods.custom_tags.sort();
+                                            mods.custom_tags.dedup();
+                                        }
+                                        mods.custom_tag_input.clear();
+                                    }
+                                });
                             });
                         });
                     })
                 }
             });
     }
+}
+
+// Read global custom tags from the main config and pending file
+fn read_global_custom_tags() -> Vec<String> {
+    let mut out: BTreeSet<String> = BTreeSet::new();
+    // Config dir
+    let mut cfg = dirs::config_dir().unwrap_or_default();
+    cfg.push("repak_manager");
+    // repak_mod_manager.json
+    let mut config_path = cfg.clone();
+    config_path.push("repak_mod_manager.json");
+    if let Ok(s) = fs::read_to_string(&config_path) {
+        if let Ok(json) = serde_json::from_str::<JsonValue>(&s) {
+            if let Some(arr) = json.get("custom_tag_catalog").and_then(|v| v.as_array()) {
+                for v in arr { if let Some(t) = v.as_str() { out.insert(t.to_string()); } }
+            }
+            if let Some(meta) = json.get("mod_metadata").and_then(|v| v.as_array()) {
+                for m in meta {
+                    if let Some(tags) = m.get("custom_tags").and_then(|v| v.as_array()) {
+                        for t in tags { if let Some(s) = t.as_str() { out.insert(s.to_string()); } }
+                    }
+                }
+            }
+        }
+    }
+    // pending_custom_tags.json
+    let mut pending = cfg.clone();
+    pending.push("pending_custom_tags.json");
+    if let Ok(s) = fs::read_to_string(&pending) {
+        if let Ok(json) = serde_json::from_str::<JsonValue>(&s) {
+            if let Some(obj) = json.as_object() {
+                for (_k, v) in obj.iter() {
+                    if let Some(arr) = v.as_array() {
+                        for t in arr { if let Some(s) = t.as_str() { out.insert(s.to_string()); } }
+                    }
+                }
+            }
+        }
+    }
+    out.into_iter().collect()
 }
 
 pub static AES_KEY: LazyLock<AesKey> = LazyLock::new(|| {

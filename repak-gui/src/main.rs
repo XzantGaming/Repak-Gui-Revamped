@@ -34,7 +34,7 @@ use std::cell::LazyCell;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, thread};
@@ -105,6 +105,8 @@ struct RepakModManager {
     #[serde(skip)]
     new_folder_name: String,
     #[serde(skip)]
+    game_path_input: String,
+    #[serde(skip)]
     search_query: String,
     #[serde(skip)]
     filtered_mods: Vec<usize>,
@@ -116,6 +118,30 @@ struct RepakModManager {
     selected_tag_filters: std::collections::HashSet<String>,
     #[serde(skip)]
     show_tag_filter_dropdown: bool,
+    #[serde(skip)]
+    custom_tag_filter_enabled: bool,
+    #[serde(skip)]
+    selected_custom_tag_filters: std::collections::HashSet<String>,
+    #[serde(default)]
+    custom_tag_catalog: Vec<String>,
+    #[serde(skip)]
+    show_custom_tag_filter_dropdown: bool,
+    #[serde(skip)]
+    show_tag_manager: bool,
+    #[serde(skip)]
+    new_global_tag_input: String,
+    #[serde(skip)]
+    rename_tag_from: Option<String>,
+    #[serde(skip)]
+    rename_tag_to: String,
+    #[serde(skip)]
+    selection_mode: bool,
+    #[serde(skip)]
+    selected_mods: std::collections::BTreeSet<usize>,
+    #[serde(skip)]
+    bulk_tag_input: String,
+    #[serde(skip)]
+    bulk_remove_choice: Option<String>,
     version: Option<String>,
     // Custom palette support
     #[serde(default)]
@@ -126,6 +152,16 @@ struct RepakModManager {
     show_palette_window: bool,
     #[serde(skip)]
     preset_name_input: String,
+    #[serde(skip)]
+    refresh_after_delete: bool,
+    #[serde(skip)]
+    delete_sender: Option<Sender<Vec<std::path::PathBuf>>>,
+    #[serde(skip)]
+    delete_results: Option<Receiver<Result<Vec<std::path::PathBuf>, String>>>,
+    #[serde(skip)]
+    deleting_mods: std::collections::HashSet<std::path::PathBuf>,
+    #[serde(skip)]
+    pending_remove_paths: Vec<std::path::PathBuf>,
 }
 
 impl Default for RepakModManager {
@@ -145,17 +181,35 @@ impl Default for RepakModManager {
             hide_welcome: false,
             creating_folder: false,
             new_folder_name: String::new(),
+            game_path_input: String::new(),
             search_query: String::new(),
             filtered_mods: Vec::new(),
             expanded_folders_for_search: std::collections::HashSet::new(),
             tag_filter_enabled: false,
             selected_tag_filters: std::collections::HashSet::new(),
             show_tag_filter_dropdown: false,
+            custom_tag_filter_enabled: false,
+            selected_custom_tag_filters: std::collections::HashSet::new(),
+            custom_tag_catalog: Vec::new(),
+            show_custom_tag_filter_dropdown: false,
+            show_tag_manager: false,
+            new_global_tag_input: String::new(),
+            rename_tag_from: None,
+            rename_tag_to: String::new(),
+            selection_mode: false,
+            selected_mods: std::collections::BTreeSet::new(),
+            bulk_tag_input: String::new(),
+            bulk_remove_choice: None,
             version: None,
             use_custom_palette: false,
             custom_palette: CustomPalette::default(),
             show_palette_window: false,
             preset_name_input: String::new(),
+            refresh_after_delete: false,
+            delete_sender: None,
+            delete_results: None,
+            deleting_mods: std::collections::HashSet::new(),
+            pending_remove_paths: Vec::new(),
         }
     }
 }
@@ -174,6 +228,8 @@ struct ModMetadata {
     path: PathBuf,
     custom_name: Option<String>,
     folder_id: Option<String>,
+    #[serde(default)]
+    custom_tags: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -184,6 +240,7 @@ struct ModEntry {
     custom_name: Option<String>,
     editing_name: bool,
     folder_id: Option<String>,
+    custom_tags: Vec<String>,
 }
 fn use_bubbly_light_theme(style: &mut egui::Style) {
     // Bubbly pastel colors for light mode
@@ -252,6 +309,54 @@ pub fn setup_custom_style(ctx: &egui::Context) {
 }
 
 impl RepakModManager {
+    fn ensure_delete_worker(&mut self) {
+        let need_spawn = self.delete_sender.is_none() || self.delete_results.is_none();
+        if !need_spawn { return; }
+        let (job_tx, job_rx): (Sender<Vec<std::path::PathBuf>>, Receiver<Vec<std::path::PathBuf>>) = channel();
+        let (res_tx, res_rx): (Sender<Result<Vec<std::path::PathBuf>, String>>, Receiver<Result<Vec<std::path::PathBuf>, String>>) = channel();
+
+        // Spawn a background thread to process deletions off the UI thread
+        std::thread::spawn(move || {
+            while let Ok(paths) = job_rx.recv() {
+                // Try to delete each file; ignore NotFound but report other errors
+                let mut first_err: Option<String> = None;
+                for p in &paths {
+                    // Try to rename to a temporary ".pending_delete" extension first to
+                    // sidestep possible locks and make deletion safer on Windows
+                    let mut target = p.clone();
+                    if target.exists() {
+                        let mut ext = target.extension().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                        if ext.is_empty() { ext = "pending_delete".to_string(); } else { ext.push_str(".pending_delete"); }
+                        let mut tmp = target.clone();
+                        tmp.set_extension(ext);
+                        if let Ok(_) = std::fs::rename(&target, &tmp) {
+                            target = tmp;
+                        }
+                    }
+                    match std::fs::remove_file(&target) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            if e.kind() == std::io::ErrorKind::NotFound {
+                                // Ignore
+                            } else {
+                                if first_err.is_none() {
+                                    first_err = Some(format!("{}: {}", target.display(), e));
+                                }
+                            }
+                        }
+                    }
+                }
+                // Send result back to UI thread
+                let _ = match first_err {
+                    Some(err) => res_tx.send(Err(err)),
+                    None => res_tx.send(Ok(paths)),
+                };
+            }
+        });
+
+        self.delete_sender = Some(job_tx);
+        self.delete_results = Some(res_rx);
+    }
     fn apply_custom_palette_to_style(&self, style: &mut egui::Style) {
         let p = &self.custom_palette;
         style.visuals.panel_fill = CustomPalette::rgba(p.panel_fill);
@@ -361,7 +466,7 @@ impl RepakModManager {
         }
         setup_custom_style(&cc.egui_ctx);
         let mut x = Self {
-            game_path,
+            game_path: game_path.clone(),
             default_font_size: 18.0,
             folders: vec![],
             pak_files: vec![],
@@ -370,6 +475,7 @@ impl RepakModManager {
             version: Some(VERSION.to_string()),
             creating_folder: false,
             new_folder_name: String::new(),
+            game_path_input: game_path.to_string_lossy().to_string(), // Initialize the editable input with the detected/loaded path
             ..Default::default()
         };
         x.update_search_filter();
@@ -423,10 +529,15 @@ impl RepakModManager {
                     custom_name: metadata.and_then(|m| m.custom_name.clone()),
                     editing_name: false,
                     folder_id: metadata.and_then(|m| m.folder_id.clone()),
+                    custom_tags: metadata
+                        .map(|m| m.custom_tags.clone())
+                        .unwrap_or_default(),
                 };
                 vecs.push(entry);
             }
             self.pak_files = vecs;
+            // Merge any pending custom tags recorded during install
+            self.apply_pending_custom_tags();
             self.update_search_filter();
         }
     }
@@ -509,10 +620,14 @@ impl RepakModManager {
         
         let has_search = !self.search_query.trim().is_empty();
         let has_tag_filter = self.tag_filter_enabled && !self.selected_tag_filters.is_empty();
+        let has_custom_tag_filter = self.custom_tag_filter_enabled
+            && !self.selected_custom_tag_filters.is_empty();
         
-        if !has_search && !has_tag_filter {
+        if !has_search && !has_tag_filter && !has_custom_tag_filter {
             // If no filters are active, show all mods
             for i in 0..self.pak_files.len() {
+                // Skip entries currently being deleted
+                if self.deleting_mods.contains(&self.pak_files[i].path) { continue; }
                 self.filtered_mods.push(i);
             }
             return;
@@ -521,6 +636,8 @@ impl RepakModManager {
         let query = self.search_query.to_lowercase();
         
         for (index, pak_file) in self.pak_files.iter().enumerate() {
+            // Skip entries currently being deleted
+            if self.deleting_mods.contains(&pak_file.path) { continue; }
             let mut matches = true;
             
             // Check search query match
@@ -540,6 +657,17 @@ impl RepakModManager {
             if has_tag_filter && matches {
                 let mod_type = self.get_mod_type(&pak_file.reader, &pak_file.path);
                 if !self.selected_tag_filters.contains(&mod_type) {
+                    matches = false;
+                }
+            }
+
+            // Check custom tag filter match (ANY)
+            if has_custom_tag_filter && matches {
+                let has_any = pak_file
+                    .custom_tags
+                    .iter()
+                    .any(|t| self.selected_custom_tag_filters.contains(t));
+                if !has_any {
                     matches = false;
                 }
             }
@@ -583,11 +711,138 @@ impl RepakModManager {
         types
     }
 
+    fn get_all_custom_tags(&self) -> std::collections::BTreeSet<String> {
+        let mut tags = std::collections::BTreeSet::new();
+        // Include catalog
+        for t in &self.custom_tag_catalog { tags.insert(t.clone()); }
+        // Include any assigned tags
+        for pak_file in &self.pak_files {
+            for t in &pak_file.custom_tags {
+                tags.insert(t.clone());
+            }
+        }
+        tags
+    }
+
+    fn apply_pending_custom_tags(&mut self) {
+        // pending file lives in the same config dir as main config
+        let mut cfg = Self::config_path();
+        cfg.pop(); // repak_mod_manager.json -> dir
+        let mut pending = cfg.clone();
+        pending.push("pending_custom_tags.json");
+        if !pending.exists() { return; }
+        let Ok(s) = fs::read_to_string(&pending) else { return; };
+        let mut map: std::collections::BTreeMap<String, Vec<String>> = match serde_json::from_str(&s) {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+        if map.is_empty() { let _ = fs::remove_file(&pending); return; }
+
+        let mut used_keys: Vec<String> = Vec::new();
+        for i in 0..self.pak_files.len() {
+            let stem = self.pak_files[i]
+                .path
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            if let Some(tags) = map.get(&stem) {
+                // merge into ModEntry
+                for t in tags {
+                    if !self.pak_files[i].custom_tags.contains(t) {
+                        self.pak_files[i].custom_tags.push(t.clone());
+                    }
+                    if !self.custom_tag_catalog.contains(t) {
+                        self.custom_tag_catalog.push(t.clone());
+                    }
+                }
+                self.pak_files[i].custom_tags.sort();
+                self.pak_files[i].custom_tags.dedup();
+                self.custom_tag_catalog.sort();
+                self.custom_tag_catalog.dedup();
+                // sync to metadata for persistence
+                self.sync_metadata();
+                used_keys.push(stem);
+            }
+        }
+        // prune used keys and save
+        if !used_keys.is_empty() {
+            for k in used_keys { map.remove(&k); }
+            if map.is_empty() {
+                let _ = fs::remove_file(&pending);
+            } else if let Ok(json) = serde_json::to_string_pretty(&map) {
+                let _ = fs::write(&pending, json);
+            }
+        }
+    }
+
+    fn rename_custom_tag(&mut self, from: &str, to: &str) {
+        if from == to || to.trim().is_empty() { return; }
+        for pak in &mut self.pak_files {
+            let mut changed = false;
+            for t in &mut pak.custom_tags {
+                if t == from { *t = to.to_string(); changed = true; }
+            }
+            if changed {
+                pak.custom_tags.sort();
+                pak.custom_tags.dedup();
+            }
+        }
+        self.update_search_filter();
+        let _ = self.save_state();
+    }
+
+    fn delete_custom_tag_global(&mut self, tag: &str) {
+        for pak in &mut self.pak_files {
+            if pak.custom_tags.iter().any(|t| t == tag) {
+                pak.custom_tags.retain(|t| t != tag);
+            }
+        }
+        self.update_search_filter();
+        let _ = self.save_state();
+    }
+
+    fn bulk_add_tag_to_selected(&mut self, tag: &str) {
+        if tag.trim().is_empty() { return; }
+        for &i in &self.selected_mods {
+            if let Some(p) = self.pak_files.get_mut(i) {
+                if !p.custom_tags.contains(&tag.to_string()) {
+                    p.custom_tags.push(tag.to_string());
+                    p.custom_tags.sort();
+                    p.custom_tags.dedup();
+                }
+            }
+        }
+        if !self.custom_tag_catalog.contains(&tag.to_string()) {
+            self.custom_tag_catalog.push(tag.to_string());
+            self.custom_tag_catalog.sort();
+            self.custom_tag_catalog.dedup();
+        }
+        self.update_search_filter();
+        let _ = self.save_state();
+    }
+
+    fn bulk_remove_tag_from_selected(&mut self, tag: &str) {
+        for &i in &self.selected_mods {
+            if let Some(p) = self.pak_files.get_mut(i) {
+                p.custom_tags.retain(|t| t != tag);
+            }
+        }
+        self.update_search_filter();
+        let _ = self.save_state();
+    }
+
     fn is_mod_visible(&self, mod_index: usize) -> bool {
+        // Hide while deleting to avoid heavy work and races
+        if let Some(p) = self.pak_files.get(mod_index).map(|m| m.path.clone()) {
+            if self.deleting_mods.contains(&p) { return false; }
+        }
         let has_search = !self.search_query.trim().is_empty();
         let has_tag_filter = self.tag_filter_enabled && !self.selected_tag_filters.is_empty();
+        let has_custom_tag_filter = self.custom_tag_filter_enabled
+            && !self.selected_custom_tag_filters.is_empty();
         
-        if !has_search && !has_tag_filter {
+        if !has_search && !has_tag_filter && !has_custom_tag_filter {
             return true;
         }
         self.filtered_mods.contains(&mod_index)
@@ -596,8 +851,10 @@ impl RepakModManager {
     fn should_expand_folder_for_search(&self, folder_id: &str) -> bool {
         let has_search = !self.search_query.trim().is_empty();
         let has_tag_filter = self.tag_filter_enabled && !self.selected_tag_filters.is_empty();
+        let has_custom_tag_filter = self.custom_tag_filter_enabled
+            && !self.selected_custom_tag_filters.is_empty();
         
-        if !has_search && !has_tag_filter {
+        if !has_search && !has_tag_filter && !has_custom_tag_filter {
             return false;
         }
         self.expanded_folders_for_search.contains(folder_id)
@@ -735,7 +992,7 @@ impl RepakModManager {
                                 }
                                 
                                 ui.separator();
-                                
+
                                 // Bubbly tag filter button
                                 let filter_button_text = if self.tag_filter_enabled {
                                     format!("Filter ({} selected)", self.selected_tag_filters.len())
@@ -747,10 +1004,28 @@ impl RepakModManager {
                                     self.show_tag_filter_dropdown = !self.show_tag_filter_dropdown;
                                 }
                                 
+                                // Custom tag filter button
+                                let custom_filter_text = if self.custom_tag_filter_enabled {
+                                    format!("Custom Tags ({} selected)", self.selected_custom_tag_filters.len())
+                                } else {
+                                    "Custom Tags".to_string()
+                                };
+
+                                if ui.add(egui::Button::new(custom_filter_text).corner_radius(egui::CornerRadius::same(12))).clicked() {
+                                    self.show_custom_tag_filter_dropdown = !self.show_custom_tag_filter_dropdown;
+                                }
+
                                 if ui.add(egui::Button::new("Clear Filters").corner_radius(egui::CornerRadius::same(12))).clicked() {
                                     self.tag_filter_enabled = false;
                                     self.selected_tag_filters.clear();
+                                    self.custom_tag_filter_enabled = false;
+                                    self.selected_custom_tag_filters.clear();
                                     self.update_search_filter();
+                                }
+
+                                ui.separator();
+                                if ui.add(egui::Button::new("Tag Manager").corner_radius(egui::CornerRadius::same(12))).clicked() {
+                                    self.show_tag_manager = !self.show_tag_manager;
                                 }
                             });
                         });
@@ -788,6 +1063,125 @@ impl RepakModManager {
                                         }
                                         if ui.button("Clear All").clicked() {
                                             self.selected_tag_filters.clear();
+                                            self.update_search_filter();
+                                        }
+                                    });
+                                }
+                            });
+                        });
+                    }
+
+                    // Global Tag Manager UI
+                    if self.show_tag_manager {
+                        ui.separator();
+                        ui.group(|ui| {
+                            ui.set_width(ui.available_width());
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new("Custom Tag Manager").strong().color(self.accent()));
+                                ui.horizontal(|ui| {
+                                    ui.label("Create new tag:");
+                                    let resp = ui.add(TextEdit::singleline(&mut self.new_global_tag_input).hint_text("e.g. SFW, NSFW"));
+                                    let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                    if enter || ui.button("Add").clicked() {
+                                        let tag = self.new_global_tag_input.trim().to_string();
+                                        if !tag.is_empty() {
+                                            if !self.custom_tag_catalog.contains(&tag) {
+                                                self.custom_tag_catalog.push(tag.clone());
+                                                self.custom_tag_catalog.sort();
+                                                self.custom_tag_catalog.dedup();
+                                                let _ = self.save_state();
+                                            }
+                                            self.new_global_tag_input.clear();
+                                        }
+                                    }
+                                });
+
+                                ui.separator();
+                                ui.label("Existing tags:");
+                                let tags: Vec<String> = self.get_all_custom_tags().into_iter().collect();
+                                for t in tags {
+                                    ui.horizontal(|ui| {
+                                        ui.label(t.clone());
+                                        if ui.button("Rename").clicked() {
+                                            self.rename_tag_from = Some(t.clone());
+                                            self.rename_tag_to = t.clone();
+                                        }
+                                        if ui.button("Delete").clicked() {
+                                            self.delete_custom_tag_global(&t);
+                                            // Also remove from catalog
+                                            self.custom_tag_catalog.retain(|x| x != &t);
+                                            let _ = self.save_state();
+                                        }
+                                    });
+                                }
+
+                                if let Some(ref from) = self.rename_tag_from {
+                                    let mut action_apply: Option<(String, String)> = None;
+                                    let from_clone = from.clone();
+                                    ui.separator();
+                                    ui.horizontal(|ui| {
+                                        ui.label(format!("Rename '{}' to:", from_clone));
+                                        let _ = ui.add(TextEdit::singleline(&mut self.rename_tag_to));
+                                        if ui.button("Apply").clicked() {
+                                            let new_name = self.rename_tag_to.trim().to_string();
+                                            if !new_name.is_empty() {
+                                                action_apply = Some((from_clone.clone(), new_name));
+                                            }
+                                        }
+                                        if ui.button("Cancel").clicked() {
+                                            self.rename_tag_from = None;
+                                            self.rename_tag_to.clear();
+                                        }
+                                    });
+                                    if let Some((from_name, new_name)) = action_apply {
+                                        self.rename_custom_tag(&from_name, &new_name);
+                                        if let Some(pos) = self.custom_tag_catalog.iter().position(|x| x == &from_name) {
+                                            self.custom_tag_catalog[pos] = new_name.clone();
+                                        } else if !self.custom_tag_catalog.contains(&new_name) {
+                                            self.custom_tag_catalog.push(new_name.clone());
+                                        }
+                                        self.custom_tag_catalog.sort();
+                                        self.custom_tag_catalog.dedup();
+                                        let _ = self.save_state();
+                                        self.rename_tag_from = None;
+                                        self.rename_tag_to.clear();
+                                    }
+                                }
+                            });
+                        });
+                    }
+                    // Custom tags filter dropdown
+                    if self.show_custom_tag_filter_dropdown {
+                        ui.horizontal(|ui| {
+                            ui.add_space(20.0);
+                            ui.vertical(|ui| {
+                                ui.checkbox(&mut self.custom_tag_filter_enabled, "Enable custom tag filtering");
+                                
+                                if self.custom_tag_filter_enabled {
+                                    ui.separator();
+                                    ui.label("Select custom tags to show:");
+                                    
+                                    let all_tags = self.get_all_custom_tags();
+                                    for tag in &all_tags {
+                                        let mut is_selected = self.selected_custom_tag_filters.contains(tag);
+                                        if ui.checkbox(&mut is_selected, tag).changed() {
+                                            if is_selected {
+                                                self.selected_custom_tag_filters.insert(tag.clone());
+                                            } else {
+                                                self.selected_custom_tag_filters.remove(tag);
+                                            }
+                                            self.update_search_filter();
+                                        }
+                                    }
+                                    
+                                    ui.separator();
+                                    ui.horizontal(|ui| {
+                                        if ui.button("Select All").clicked() {
+                                            self.selected_custom_tag_filters = all_tags.iter().cloned().collect();
+                                            self.update_search_filter();
+                                        }
+                                        if ui.button("Clear All").clicked() {
+                                            self.selected_custom_tag_filters.clear();
                                             self.update_search_filter();
                                         }
                                     });
@@ -985,6 +1379,10 @@ impl RepakModManager {
         let mut reset_name = false;
         let mut new_folder_id: Option<Option<String>> = None;
         let folders_clone = self.folders.clone();
+        // Custom tags temp state for this context menu
+        let available_custom_tags: Vec<String> = self.get_all_custom_tags().into_iter().collect();
+        let mut new_tag_input: String = String::new();
+        let mut tags_to_toggle: Vec<(String, bool)> = Vec::new();
         
         // Get current state before borrowing
         let is_editing = self.pak_files[index].editing_name;
@@ -997,6 +1395,14 @@ impl RepakModManager {
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::left_to_right(Align::LEFT), |ui| {
                 ui.set_max_width(ui.available_width() * 0.85);
+                // Selection checkbox for bulk operations
+                if self.selection_mode {
+                    let mut checked = self.selected_mods.contains(&index);
+                    if ui.checkbox(&mut checked, "").changed() {
+                        if checked { self.selected_mods.insert(index); } else { self.selected_mods.remove(&index); }
+                    }
+                    ui.add_space(4.0);
+                }
 
                 if is_editing {
                     let mut temp_name = current_name.unwrap_or_else(|| {
@@ -1058,6 +1464,7 @@ impl RepakModManager {
                         if ui.button("Rename mod").clicked() {
                             start_editing = true;
                             ui.close_menu();
+                            ui.ctx().request_repaint();
                         }
                         
                         if has_custom_name && ui.button("Reset to original name").clicked() {
@@ -1079,6 +1486,40 @@ impl RepakModManager {
                                 if ui.button(&folder.name).clicked() {
                                     new_folder_id = Some(Some(folder.id.clone()));
                                     should_save = true;
+                                    ui.close_menu();
+                                }
+                            }
+                        });
+
+                        ui.separator();
+
+                        // Custom Tags submenu: toggle existing tags, add new ones
+                        ui.menu_button("Tags", |ui| {
+                            ui.label("Assign or remove custom tags:");
+                            ui.separator();
+
+                            for tag in &available_custom_tags {
+                                let mut has_tag = self.pak_files[index].custom_tags.contains(tag);
+                                if ui.checkbox(&mut has_tag, tag).changed() {
+                                    tags_to_toggle.push((tag.clone(), has_tag));
+                                }
+                            }
+
+                            ui.separator();
+                            ui.label("Create new tag:");
+                            let resp = ui.add(TextEdit::singleline(&mut new_tag_input).hint_text("e.g. SFW, NSFW"));
+                            let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            if enter || ui.button("Add").clicked() {
+                                if !new_tag_input.trim().is_empty() {
+                                    let tag = new_tag_input.trim().to_string();
+                                    if !self.pak_files[index].custom_tags.contains(&tag) {
+                                        self.pak_files[index].custom_tags.push(tag);
+                                        self.pak_files[index].custom_tags.sort();
+                                        self.pak_files[index].custom_tags.dedup();
+                                        should_save = true;
+                                        self.update_search_filter();
+                                    }
+                                    new_tag_input.clear();
                                     ui.close_menu();
                                 }
                             }
@@ -1108,25 +1549,86 @@ impl RepakModManager {
                             ui.close_menu();
                         }
                         
-                        if ui.button("Delete mod").clicked() {
+                        let is_deleting_this = self.deleting_mods.contains(&pak_path);
+                        let del_btn = ui.add_enabled(!is_deleting_this, egui::Button::new("Delete mod"));
+                        if del_btn.clicked() {
+                            // Queue deletion on background thread (non-blocking)
+                            self.ensure_delete_worker();
                             let utoc_path = pak_path.with_extension("utoc");
                             let ucas_path = pak_path.with_extension("ucas");
-
-                            let files_to_delete = vec![&pak_path, &utoc_path, &ucas_path];
-
-                            for file_path in files_to_delete {
-                                if let Err(e) = fs::remove_file(file_path) {
-                                    error!("Failed to delete pak: {}", e);
-                                    return;
+                            // Enqueue original paths; background worker handles rename+delete
+                            let files_to_delete = vec![pak_path.clone(), utoc_path, ucas_path];
+                            if let Some(tx) = &self.delete_sender {
+                                // Track as deleting to prevent double-actions
+                                self.deleting_mods.insert(pak_path.clone());
+                                // Defer actual UI list mutation until after iteration
+                                self.pending_remove_paths.push(pak_path.clone());
+                                if let Err(e) = tx.send(files_to_delete) {
+                                    error!("Failed to queue delete: {}", e);
+                                    // If we failed to enqueue, clear deleting state
+                                    self.deleting_mods.remove(&pak_path);
+                                    if let Some(pos) = self.pending_remove_paths.iter().position(|p| p == &pak_path) { self.pending_remove_paths.remove(pos); }
                                 }
+                            } else {
+                                error!("Delete worker not available");
                             }
                             should_set_current = false;
+                            // Immediately clear selection to prevent heavy details UI from running
+                            self.current_pak_file_idx = None;
+                            self.table = None;
                             ui.close_menu();
+                            ui.ctx().request_repaint();
                         }
                     });
-                    
                     if ui.add(egui::Button::new("✏").corner_radius(egui::CornerRadius::same(8))).clicked() {
                         start_editing = true;
+                    }
+
+                    // Show custom tag chips for this mod
+                    if !self.pak_files[index].custom_tags.is_empty() {
+                        ui.add_space(8.0);
+                        ui.horizontal_wrapped(|ui| {
+                            for tag in &self.pak_files[index].custom_tags {
+                                let chip = egui::Button::new(
+                                    egui::RichText::new(tag).size(10.0)
+                                )
+                                .fill(ui.style().visuals.extreme_bg_color)
+                                .frame(true)
+                                .corner_radius(egui::CornerRadius::same(10))
+                                .small();
+                                let _ = ui.add(chip);
+                            }
+                        });
+                    }
+
+                    // Inline quick tag editor menu next to the entry
+                    let mut inline_toggles: Vec<(String, bool)> = Vec::new();
+                    ui.menu_button("🏷", |ui| {
+                        ui.set_min_width(200.0);
+                        ui.label("Tags for this mod:");
+                        ui.separator();
+                        let all_tags = self.get_all_custom_tags();
+                        for t in &all_tags {
+                            let mut has_tag = self.pak_files[index].custom_tags.contains(t);
+                            if ui.checkbox(&mut has_tag, t).changed() {
+                                inline_toggles.push((t.clone(), has_tag));
+                            }
+                        }
+                    });
+                    if !inline_toggles.is_empty() {
+                        for (t, add) in inline_toggles {
+                            if add {
+                                if !self.pak_files[index].custom_tags.contains(&t) {
+                                    self.pak_files[index].custom_tags.push(t);
+                                }
+                            } else {
+                                self.pak_files[index].custom_tags.retain(|x| x != &t);
+                            }
+                        }
+                        self.pak_files[index].custom_tags.sort();
+                        self.pak_files[index].custom_tags.dedup();
+                        should_save = true;
+                        self.update_search_filter();
                     }
                 }
             });
@@ -1194,6 +1696,23 @@ impl RepakModManager {
             }
         }
         
+        // Apply tag toggles
+        if !tags_to_toggle.is_empty() {
+            for (tag, add) in tags_to_toggle {
+                if add {
+                    if !self.pak_files[index].custom_tags.contains(&tag) {
+                        self.pak_files[index].custom_tags.push(tag);
+                    }
+                } else {
+                    self.pak_files[index].custom_tags.retain(|t| t != &tag);
+                }
+            }
+            self.pak_files[index].custom_tags.sort();
+            self.pak_files[index].custom_tags.dedup();
+            should_save = true;
+            self.update_search_filter();
+        }
+
         if should_save {
             self.save_state().ok();
         }
@@ -1314,6 +1833,7 @@ impl RepakModManager {
                 path: pak_file.path.clone(),
                 custom_name: pak_file.custom_name.clone(),
                 folder_id: pak_file.folder_id.clone(),
+                custom_tags: pak_file.custom_tags.clone(),
             };
             self.mod_metadata.push(metadata);
         }
@@ -1376,7 +1896,7 @@ impl RepakModManager {
                 } else {
                     // Handle the case where not all dropped files are valid
                     // You can show an error or prompt the user here
-                    println!(
+                    warn!(
                         "Not all files are valid. Only directories or .pak files are allowed."
                     );
                 }
@@ -1487,20 +2007,26 @@ impl RepakModManager {
             .align_items(FlexAlign::Center)
             .show(ui, |flex_ui| {
                 flex_ui.add(item(), Label::new("Mod folder:"));
-                flex_ui.add(
+                // Bind the text field to a persistent buffer and sync back to game_path
+                let resp = flex_ui.add(
                     item().grow(1.0),
-                    TextEdit::singleline(&mut self.game_path.to_string_lossy().to_string()),
+                    TextEdit::singleline(&mut self.game_path_input)
+                        .hint_text("Type or paste a path..."),
                 );
+                if resp.changed() {
+                    self.game_path = PathBuf::from(self.game_path_input.clone());
+                }
                 let browse_button = flex_ui.add(item(), Button::new("Browse").corner_radius(egui::CornerRadius::same(8)));
                 if browse_button.clicked() {
                     if let Some(path) = FileDialog::new().pick_folder() {
                         self.game_path = path;
+                        self.game_path_input = self.game_path.to_string_lossy().to_string();
                     }
                 }
                 flex_ui.add_ui(item(), |ui| {
                     let x = ui.add_enabled(self.game_path.exists(), Button::new("Open mod folder").corner_radius(egui::CornerRadius::same(8)));
                     if x.clicked() {
-                        println!("Opening mod folder: {}", self.game_path.to_string_lossy());
+                        info!("Opening mod folder: {}", self.game_path.to_string_lossy());
                         #[cfg(target_os = "windows")]
                         {
                             let process = std::process::Command::new("explorer.exe")
@@ -1548,6 +2074,49 @@ impl eframe::App for RepakModManager {
             self.install_mod_dialog = None;
         }
 
+        // Poll background delete results (non-blocking) and schedule refresh
+        if let Some(ref rx) = self.delete_results {
+            while let Ok(res) = rx.try_recv() {
+                match res {
+                    Ok(paths) => {
+                        // Best-effort: first element is the pak path we queued
+                        if let Some(pak_p) = paths.get(0) { self.deleting_mods.remove(pak_p); }
+                        self.refresh_after_delete = true;
+                    }
+                    Err(err) => {
+                        error!("Delete failed: {}", err);
+                        self.deleting_mods.clear();
+                        self.refresh_after_delete = true;
+                    }
+                }
+            }
+        }
+
+        // Apply any pending removals immediately to drop file handles and reduce UI work
+        if !self.pending_remove_paths.is_empty() {
+            let mut to_remove = std::mem::take(&mut self.pending_remove_paths);
+            to_remove.sort();
+            to_remove.dedup();
+            // Remove from pak_files
+            self.pak_files.retain(|m| !to_remove.contains(&m.path));
+            // Remove metadata entries as well
+            self.mod_metadata.retain(|md| !to_remove.contains(&md.path));
+            // Clear selection/table and refresh filter
+            self.current_pak_file_idx = None;
+            self.table = None;
+            self.update_search_filter();
+            // No need to collect here; deletion worker will trigger a final refresh
+        }
+
+        // If a deletion happened last frame, safely refresh state now
+        if self.refresh_after_delete {
+            self.current_pak_file_idx = None;
+            self.table = None;
+            self.collect_pak_files();
+            self.update_search_filter();
+            self.refresh_after_delete = false;
+        }
+
         if self.install_mod_dialog.is_none() {
             if let Some(ref receiver) = &self.receiver {
                 while let Ok(event) = receiver.try_recv() {
@@ -1557,7 +2126,12 @@ impl eframe::App for RepakModManager {
                         }
                         EventKind::Other => {}
                         _ => {
-                            collect_pak = true;
+                            // If a background delete is in-flight, defer heavy refresh
+                            if self.deleting_mods.is_empty() {
+                                collect_pak = true;
+                            } else {
+                                self.refresh_after_delete = true;
+                            }
                         }
                     }
                 }
@@ -1565,9 +2139,12 @@ impl eframe::App for RepakModManager {
         }
         // if install_mod_dialog is open we dont want to listen to events
 
-        if collect_pak {
+        if collect_pak && self.deleting_mods.is_empty() {
             trace!("Collecting pak files");
             self.collect_pak_files();
+        } else if collect_pak {
+            // Defer to after delete completes
+            self.refresh_after_delete = true;
         }
 
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
@@ -1577,6 +2154,68 @@ impl eframe::App for RepakModManager {
 
             ui.separator();
             self.show_file_dialog(ui);
+
+            // Bulk actions toolbar
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.selection_mode, "Selection mode");
+                if self.selection_mode {
+                    let count = self.selected_mods.len();
+                    ui.label(format!("Selected: {}", count));
+                    let can_delete = count > 0;
+                    if ui.add_enabled(can_delete, Button::new("Delete selected mods").corner_radius(egui::CornerRadius::same(8))).clicked() {
+                        // Ensure worker exists
+                        self.ensure_delete_worker();
+
+                        // Build list of base pak paths from selected indices
+                        let mut base_paths: Vec<std::path::PathBuf> = Vec::new();
+                        for &i in &self.selected_mods {
+                            if let Some(m) = self.pak_files.get(i) {
+                                base_paths.push(m.path.clone());
+                            }
+                        }
+
+                        // Prepare files to delete: try fast rename to .pending_delete first
+                        let mut files_to_delete: Vec<std::path::PathBuf> = Vec::new();
+                        for pak_path in &base_paths {
+                            let utoc_path = pak_path.with_extension("utoc");
+                            let ucas_path = pak_path.with_extension("ucas");
+                            for p in [pak_path, &utoc_path, &ucas_path] {
+                                if !p.exists() { continue; }
+                                let mut tmp = p.clone();
+                                let mut ext = tmp.extension().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                                if ext.is_empty() { ext = "pending_delete".to_string(); } else { ext.push_str(".pending_delete"); }
+                                tmp.set_extension(ext);
+                                match std::fs::rename(p, &tmp) {
+                                    Ok(_) => files_to_delete.push(tmp),
+                                    Err(_e) => files_to_delete.push(p.clone()),
+                                }
+                            }
+                        }
+
+                        // Queue one batch job; if channel fails, log and skip
+                        let mut queued = false;
+                        if let Some(tx) = &self.delete_sender {
+                            if tx.send(files_to_delete).is_ok() { queued = true; }
+                        }
+
+                        // Update UI state regardless; background worker will finish deletion
+                        // Mark each as deleting and remove from UI list next frame
+                        for p in base_paths {
+                            self.deleting_mods.insert(p.clone());
+                            self.pending_remove_paths.push(p);
+                        }
+                        // Clear selection and current table
+                        self.selected_mods.clear();
+                        self.current_pak_file_idx = None;
+                        self.table = None;
+                        // Schedule refresh
+                        self.refresh_after_delete = true;
+                        ui.ctx().request_repaint();
+                        if !queued { error!("Failed to queue bulk delete"); }
+                    }
+                }
+            });
         });
 
         egui::SidePanel::left("left_panel")

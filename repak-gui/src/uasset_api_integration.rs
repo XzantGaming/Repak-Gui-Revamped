@@ -1,5 +1,5 @@
 use std::path::Path;
-use log::{debug, warn, error};
+use log::{debug, warn};
 use uasset_toolkit::{UAssetToolkitSync, TextureInfo, MeshInfo};
 
 /// Integration module for UAssetAPI from GitHub
