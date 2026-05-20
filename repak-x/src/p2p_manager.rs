@@ -6,16 +6,16 @@
 //! internet-wide sharing without manual configuration.
 
 use crate::p2p_libp2p::ShareInfo;
-use crate::p2p_sharing::{ShareSession, TransferProgress, TransferStatus, P2PError, P2PResult};
+use crate::p2p_sharing::{P2PError, P2PResult, ShareSession, TransferProgress, TransferStatus};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use log::{info, error, warn};
+use log::{error, info, warn};
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
-use parking_lot::Mutex;
 use tauri::{Emitter, Window};
 
 // ============================================================================
@@ -24,8 +24,14 @@ use tauri::{Emitter, Window};
 
 /// Attempt UPnP port mapping on the router.
 /// Returns (external_ip, external_port) on success.
-async fn try_upnp_port_mapping(local_ip: Ipv4Addr, local_port: u16) -> Option<(std::net::IpAddr, u16)> {
-    info!("[P2P/UPnP] Attempting UPnP port mapping {}:{} ...", local_ip, local_port);
+async fn try_upnp_port_mapping(
+    local_ip: Ipv4Addr,
+    local_port: u16,
+) -> Option<(std::net::IpAddr, u16)> {
+    info!(
+        "[P2P/UPnP] Attempting UPnP port mapping {}:{} ...",
+        local_ip, local_port
+    );
 
     let search_opts = igd_next::SearchOptions {
         timeout: Some(Duration::from_secs(5)),
@@ -57,28 +63,43 @@ async fn try_upnp_port_mapping(local_ip: Ipv4Addr, local_port: u16) -> Option<(s
 
     // Add port mapping (TCP, same external port, 2 hour lease)
     let internal_addr = SocketAddr::V4(SocketAddrV4::new(local_ip, local_port));
-    match gateway.add_port(
-        igd_next::PortMappingProtocol::TCP,
-        local_port,
-        internal_addr,
-        7200, // 2 hour lease duration
-        "Repak-X P2P Mod Sharing",
-    ).await {
+    match gateway
+        .add_port(
+            igd_next::PortMappingProtocol::TCP,
+            local_port,
+            internal_addr,
+            7200, // 2 hour lease duration
+            "Repak-X P2P Mod Sharing",
+        )
+        .await
+    {
         Ok(()) => {
-            info!("[P2P/UPnP] Port mapping created: external {}:{} -> internal {}", external_ip, local_port, internal_addr);
+            info!(
+                "[P2P/UPnP] Port mapping created: external {}:{} -> internal {}",
+                external_ip, local_port, internal_addr
+            );
             Some((external_ip, local_port))
         }
         Err(e) => {
-            warn!("[P2P/UPnP] Port mapping failed: {} - trying add_any_port", e);
+            warn!(
+                "[P2P/UPnP] Port mapping failed: {} - trying add_any_port",
+                e
+            );
             // Fallback: let the router pick an external port
-            match gateway.add_any_port(
-                igd_next::PortMappingProtocol::TCP,
-                internal_addr,
-                7200,
-                "Repak-X P2P Mod Sharing",
-            ).await {
+            match gateway
+                .add_any_port(
+                    igd_next::PortMappingProtocol::TCP,
+                    internal_addr,
+                    7200,
+                    "Repak-X P2P Mod Sharing",
+                )
+                .await
+            {
                 Ok(ext_port) => {
-                    info!("[P2P/UPnP] Port mapping created (any port): external {}:{} -> internal {}", external_ip, ext_port, internal_addr);
+                    info!(
+                        "[P2P/UPnP] Port mapping created (any port): external {}:{} -> internal {}",
+                        external_ip, ext_port, internal_addr
+                    );
                     Some((external_ip, ext_port))
                 }
                 Err(e2) => {
@@ -98,7 +119,10 @@ async fn remove_upnp_port_mapping(port: u16) {
         ..Default::default()
     };
     if let Ok(gateway) = igd_next::aio::tokio::search_gateway(search_opts).await {
-        match gateway.remove_port(igd_next::PortMappingProtocol::TCP, port).await {
+        match gateway
+            .remove_port(igd_next::PortMappingProtocol::TCP, port)
+            .await
+        {
             Ok(()) => info!("[P2P/UPnP] Port mapping removed for port {}", port),
             Err(e) => warn!("[P2P/UPnP] Failed to remove port mapping: {}", e),
         }
@@ -147,7 +171,10 @@ async fn get_public_ip_http() -> Option<String> {
 /// Create a bore tunnel to relay TCP traffic through bore.pub.
 /// Returns (bore_address, bore_port, join_handle) on success.
 async fn try_bore_tunnel(local_port: u16) -> Option<(String, u16, tokio::task::JoinHandle<()>)> {
-    info!("[P2P/Bore] Creating relay tunnel for local port {} via bore.pub ...", local_port);
+    info!(
+        "[P2P/Bore] Creating relay tunnel for local port {} via bore.pub ...",
+        local_port
+    );
 
     // Connect to bore.pub with a 15s timeout
     let client = match tokio::time::timeout(
@@ -251,7 +278,10 @@ impl UnifiedP2PManager {
         // 1) Try UPnP automatic port forwarding
         match try_upnp_port_mapping(local_ip_parsed, local_port).await {
             Some((ext_ip, ext_port)) => {
-                info!("[P2P] UPnP success - public address: {}:{}", ext_ip, ext_port);
+                info!(
+                    "[P2P] UPnP success - public address: {}:{}",
+                    ext_ip, ext_port
+                );
                 addresses.push(format!("{}:{}", ext_ip, ext_port));
                 upnp_external_port = Some(ext_port);
             }
@@ -364,8 +394,8 @@ impl UnifiedP2PManager {
         info!("[P2P] Starting receive to: {}", out.display());
 
         // Decode connection string
-        let share_info = ShareInfo::decode(conn)
-            .map_err(|e| P2PError::ValidationError(format!("{}", e)))?;
+        let share_info =
+            ShareInfo::decode(conn).map_err(|e| P2PError::ValidationError(format!("{}", e)))?;
         if share_info.addresses.is_empty() {
             return Err(P2PError::ValidationError(
                 "No addresses in share info".into(),
@@ -418,8 +448,9 @@ impl UnifiedP2PManager {
 
         // Shared slot for the active progress handle so the sync task can
         // pick it up once the working client is determined.
-        let active_progress: Arc<std::sync::Mutex<Option<Arc<std::sync::Mutex<TransferProgress>>>>> =
-            Arc::new(std::sync::Mutex::new(None));
+        let active_progress: Arc<
+            std::sync::Mutex<Option<Arc<std::sync::Mutex<TransferProgress>>>>,
+        > = Arc::new(std::sync::Mutex::new(None));
         let active_progress_for_sync = active_progress.clone();
 
         // Spawn download thread - tries each address in order
@@ -457,7 +488,12 @@ impl UnifiedP2PManager {
 
                 for attempt in 0..max_attempts {
                     if attempt > 0 {
-                        info!("[P2P] Retrying {} (attempt {}/{})", addr, attempt + 1, max_attempts);
+                        info!(
+                            "[P2P] Retrying {} (attempt {}/{})",
+                            addr,
+                            attempt + 1,
+                            max_attempts
+                        );
                         std::thread::sleep(Duration::from_secs(2));
                         if let Some(d) = dl.lock().get_mut(&c) {
                             d.progress.current_file =
@@ -501,7 +537,13 @@ impl UnifiedP2PManager {
                             return;
                         }
                         Err(e) => {
-                            warn!("[P2P] Transfer via {} failed (attempt {}/{}): {}", addr, attempt + 1, max_attempts, e);
+                            warn!(
+                                "[P2P] Transfer via {} failed (attempt {}/{}): {}",
+                                addr,
+                                attempt + 1,
+                                max_attempts,
+                                e
+                            );
                             last_error = format!("{}: {}", addr, e);
                             // retry or try next address
                         }
@@ -525,10 +567,7 @@ impl UnifiedP2PManager {
                 tokio::time::sleep(Duration::from_millis(250)).await;
 
                 // Try to read from the active client's progress handle
-                let handle = active_progress_for_sync
-                    .lock()
-                    .ok()
-                    .and_then(|g| g.clone());
+                let handle = active_progress_for_sync.lock().ok().and_then(|g| g.clone());
                 if let Some(h) = handle {
                     if let Ok(prog) = h.lock().map(|p| p.clone()) {
                         let is_done = matches!(
@@ -579,7 +618,10 @@ impl UnifiedP2PManager {
     }
 
     pub fn get_share_session(&self, code: &str) -> Option<ShareSession> {
-        self.active_shares.lock().get(code).map(|s| s.session.clone())
+        self.active_shares
+            .lock()
+            .get(code)
+            .map(|s| s.session.clone())
     }
 
     pub fn get_transfer_progress(&self, code: &str) -> Option<TransferProgress> {

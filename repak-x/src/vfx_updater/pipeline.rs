@@ -1,30 +1,42 @@
 //! VFX Updater - Pipeline Step Orchestration
-//! 
+//!
 //! High-level pipeline functions that coordinate the VFX update workflow.
 
 use std::path::Path;
 
+use super::file_ops::{cleanup_vfx_temp_directories, create_step_directory};
 use super::logging::vfx_info;
-use super::models::{VfxPipelineProgress, VfxTempDirectories, AssetClassInfo};
+use super::models::{AssetClassInfo, VfxPipelineProgress, VfxTempDirectories};
 use super::progress::VfxProgressSink;
-use super::file_ops::{create_step_directory, cleanup_vfx_temp_directories};
 use super::uasset_tool::{
-    extract_mod_assets, convert_uassets_to_json, convert_json_to_uassets,
-    extract_vanilla_assets, pack_to_iostore, run_vfx_uat_request, VfxUatRequest,
+    convert_json_to_uassets, convert_uassets_to_json, extract_mod_assets, extract_vanilla_assets,
+    pack_to_iostore, run_vfx_uat_request, VfxUatRequest,
 };
 
 /// Create all temp directories for a pipeline run
 pub fn create_pipeline_directories() -> Result<VfxTempDirectories, String> {
     let base = super::file_ops::get_vfx_temp_base()?;
-    
+
     Ok(VfxTempDirectories {
         base: base.to_string_lossy().to_string(),
-        mod_extract: create_step_directory("mod_extract")?.to_string_lossy().to_string(),
-        mod_json: create_step_directory("mod_json")?.to_string_lossy().to_string(),
-        vanilla_extract: create_step_directory("vanilla_extract")?.to_string_lossy().to_string(),
-        vanilla_json: create_step_directory("vanilla_json")?.to_string_lossy().to_string(),
-        edited_json: create_step_directory("edited_json")?.to_string_lossy().to_string(),
-        final_uassets: create_step_directory("final_uassets")?.to_string_lossy().to_string(),
+        mod_extract: create_step_directory("mod_extract")?
+            .to_string_lossy()
+            .to_string(),
+        mod_json: create_step_directory("mod_json")?
+            .to_string_lossy()
+            .to_string(),
+        vanilla_extract: create_step_directory("vanilla_extract")?
+            .to_string_lossy()
+            .to_string(),
+        vanilla_json: create_step_directory("vanilla_json")?
+            .to_string_lossy()
+            .to_string(),
+        edited_json: create_step_directory("edited_json")?
+            .to_string_lossy()
+            .to_string(),
+        final_uassets: create_step_directory("final_uassets")?
+            .to_string_lossy()
+            .to_string(),
     })
 }
 
@@ -100,7 +112,7 @@ pub async fn detect_asset_class(
     file_path: &str,
 ) -> Result<AssetClassInfo, String> {
     vfx_info(&format!("Detecting asset class for: {}", file_path));
-    
+
     let request = VfxUatRequest {
         action: "detect_class",
         file_path: Some(file_path.to_string()),
@@ -111,32 +123,36 @@ pub async fn detect_asset_class(
         mount_point: None,
         base_path: None,
     };
-    
+
     let response = run_vfx_uat_request(tool_path, &request).await?;
-    
+
     if !response.success {
         return Err(format!("[VFX] detect_class failed: {}", response.message));
     }
-    
+
     // Parse the class info from response data
-    let class_name = response.data
+    let class_name = response
+        .data
         .as_ref()
         .and_then(|d| d.get("class_name"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
-    
-    let is_material_instance = class_name.as_ref()
+
+    let is_material_instance = class_name
+        .as_ref()
         .map(|c| c.contains("MaterialInstance"))
         .unwrap_or(false);
-    
-    let is_niagara = class_name.as_ref()
+
+    let is_niagara = class_name
+        .as_ref()
         .map(|c| c.contains("Niagara") || c.starts_with("NS_"))
         .unwrap_or(false);
-    
-    let is_widget = class_name.as_ref()
+
+    let is_widget = class_name
+        .as_ref()
         .map(|c| c.contains("Widget") || c.starts_with("WBP_"))
         .unwrap_or(false);
-    
+
     Ok(AssetClassInfo {
         file_path: file_path.to_string(),
         class_name,
@@ -145,5 +161,3 @@ pub async fn detect_asset_class(
         is_widget,
     })
 }
-
-

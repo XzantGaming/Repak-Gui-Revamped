@@ -1,23 +1,23 @@
 //! VFX Updater - Isolated UAssetTool Interactive Session
-//! 
+//!
 //! This module manages a completely separate UAssetTool process from Repak-X's
 //! existing uasset_toolkit. It provides async functions for VFX pipeline operations.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use std::process::Stdio;
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 
-use super::logging::{vfx_info, vfx_debug, vfx_warn, vfx_error};
+use super::logging::{vfx_debug, vfx_error, vfx_info, vfx_warn};
 use super::models::VfxPipelineProgress;
 use super::progress::VfxProgressSink;
 
@@ -403,7 +403,10 @@ pub async fn extract_mod_assets(
         .collect::<Vec<_>>()
         .join("\n");
     let _ = fs::write(&list_path, &list_content);
-    vfx_debug(&format!("Wrote uasset_list.txt with {} entries", assets.len()));
+    vfx_debug(&format!(
+        "Wrote uasset_list.txt with {} entries",
+        assets.len()
+    ));
 
     progress.emit(VfxPipelineProgress {
         stage: "Extract Mod Assets".to_string(),
@@ -466,7 +469,7 @@ pub async fn convert_uassets_to_json(
         output_path: Some(output_dir.to_string()),
         filter: None,
         mount_point: None,
-        base_path: Some(input_dir.to_string()),  // Preserves relative structure
+        base_path: Some(input_dir.to_string()), // Preserves relative structure
     };
 
     let mut converted_files = Vec::new();
@@ -522,7 +525,10 @@ pub async fn convert_json_to_uassets(
         step: 7,
         current: 0,
         total: 1,
-        message: format!("Converting {} JSON files in single batch...", json_files.len()),
+        message: format!(
+            "Converting {} JSON files in single batch...",
+            json_files.len()
+        ),
     });
 
     fs::create_dir_all(output_dir).map_err(|e| e.to_string())?;
@@ -552,7 +558,7 @@ pub async fn convert_json_to_uassets(
         output_path: Some(output_dir.to_string()),
         filter: None,
         mount_point: None,
-        base_path: Some(input_dir.to_string()),  // Preserves relative structure
+        base_path: Some(input_dir.to_string()), // Preserves relative structure
     };
 
     match run_vfx_uat_request(tool_path, &request).await {
@@ -636,8 +642,13 @@ pub async fn extract_vanilla_assets(
     let filters_file_path = std::env::temp_dir().join(filters_file_name);
     let filters_file_contents = normalized_patterns.join("\n");
 
-    fs::write(&filters_file_path, filters_file_contents)
-        .map_err(|e| format!("[VFX] Failed to write filter file {}: {}", filters_file_path.display(), e))?;
+    fs::write(&filters_file_path, filters_file_contents).map_err(|e| {
+        format!(
+            "[VFX] Failed to write filter file {}: {}",
+            filters_file_path.display(),
+            e
+        )
+    })?;
 
     let mut cmd = Command::new(tool_path);
     cmd.arg("extract_iostore_legacy")
@@ -659,7 +670,10 @@ pub async fn extract_vanilla_assets(
         vfx_debug(&format!("    [{}] {}", i, p));
     }
     if normalized_patterns.len() > 20 {
-        vfx_debug(&format!("    ... and {} more", normalized_patterns.len() - 20));
+        vfx_debug(&format!(
+            "    ... and {} more",
+            normalized_patterns.len() - 20
+        ));
     }
 
     let output = cmd
@@ -747,7 +761,10 @@ pub async fn pack_to_iostore(
 
     vfx_debug(&format!(
         "pack_to_iostore\n  input_dir: {}\n  output_base: {}\n  usmap: {}\n  uasset_files: {}",
-        input_dir, output_base, usmap_path, uasset_files.len()
+        input_dir,
+        output_base,
+        usmap_path,
+        uasset_files.len()
     ));
 
     progress.emit(VfxPipelineProgress {
@@ -797,12 +814,13 @@ pub async fn get_asset_classes(
     progress: &dyn VfxProgressSink,
 ) -> Result<std::collections::HashMap<String, String>, String> {
     use std::collections::HashMap;
-    
+
     vfx_debug(&format!(
         "get_asset_classes\n  usmap: {}\n  files: {}",
-        usmap_path, uasset_paths.len()
+        usmap_path,
+        uasset_paths.len()
     ));
-    
+
     progress.emit(VfxPipelineProgress {
         stage: "Scanning asset classes".to_string(),
         step: 0,
@@ -810,13 +828,13 @@ pub async fn get_asset_classes(
         total: uasset_paths.len(),
         message: format!("Scanning {} assets...", uasset_paths.len()),
     });
-    
+
     let mut class_map: HashMap<String, String> = HashMap::new();
-    
+
     // Process in batches to avoid overwhelming the session
     let batch_size = 50;
     let batches: Vec<_> = uasset_paths.chunks(batch_size).collect();
-    
+
     for (batch_idx, batch) in batches.iter().enumerate() {
         let request = VfxUatRequest {
             action: "get_class",
@@ -828,7 +846,7 @@ pub async fn get_asset_classes(
             mount_point: None,
             base_path: None,
         };
-        
+
         if batch_idx % 5 == 0 || batch_idx == batches.len() - 1 {
             vfx_debug(&format!(
                 "get_class batch {}/{}: {} files",
@@ -837,7 +855,7 @@ pub async fn get_asset_classes(
                 batch.len()
             ));
         }
-        
+
         match run_vfx_uat_request(tool_path, &request).await {
             Ok(response) => {
                 if response.success {
@@ -852,24 +870,35 @@ pub async fn get_asset_classes(
                         }
                     }
                 } else {
-                    vfx_warn(&format!("get_class batch {} warning: {}", batch_idx + 1, response.message));
+                    vfx_warn(&format!(
+                        "get_class batch {} warning: {}",
+                        batch_idx + 1,
+                        response.message
+                    ));
                 }
             }
             Err(e) => {
                 vfx_error(&format!("get_class batch {} error: {}", batch_idx + 1, e));
             }
         }
-        
+
         progress.emit(VfxPipelineProgress {
             stage: "Scanning asset classes".to_string(),
             step: 0,
             current: ((batch_idx + 1) * batch_size).min(uasset_paths.len()),
             total: uasset_paths.len(),
-            message: format!("Scanned {}/{} assets", (batch_idx + 1) * batch.len(), uasset_paths.len()),
+            message: format!(
+                "Scanned {}/{} assets",
+                (batch_idx + 1) * batch.len(),
+                uasset_paths.len()
+            ),
         });
     }
-    
-    vfx_info(&format!("get_asset_classes complete: {} classes mapped", class_map.len()));
+
+    vfx_info(&format!(
+        "get_asset_classes complete: {} classes mapped",
+        class_map.len()
+    ));
     Ok(class_map)
 }
 
@@ -910,7 +939,8 @@ pub async fn batch_detect_asset_types(
 
     vfx_debug(&format!(
         "batch_detect_asset_types\n  usmap: {}\n  files: {}",
-        usmap_path, uasset_paths.len()
+        usmap_path,
+        uasset_paths.len()
     ));
 
     progress.emit(VfxPipelineProgress {
@@ -958,9 +988,8 @@ pub async fn batch_detect_asset_types(
                                     .map(|p| p.to_string());
 
                                 if let Some(path) = path {
-                                    let raw_asset_type = result
-                                        .get("asset_type")
-                                        .and_then(|v| v.as_str());
+                                    let raw_asset_type =
+                                        result.get("asset_type").and_then(|v| v.as_str());
                                     let normalized = normalize_detected_type(raw_asset_type);
                                     if raw_asset_type.is_none() {
                                         vfx_warn(&format!(
@@ -979,7 +1008,10 @@ pub async fn batch_detect_asset_types(
                             vfx_debug(&format!("detect_type raw data: {}", data));
                         }
                     } else {
-                        vfx_warn(&format!("detect_type batch {} returned no data", batch_idx + 1));
+                        vfx_warn(&format!(
+                            "detect_type batch {} returned no data",
+                            batch_idx + 1
+                        ));
                     }
                 } else {
                     vfx_warn(&format!(

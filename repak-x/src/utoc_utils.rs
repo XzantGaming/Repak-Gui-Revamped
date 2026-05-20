@@ -26,32 +26,37 @@ pub fn try_read_utoc(utoc_path: &Path) -> Result<Vec<UtocFileEntry>, String> {
     let result = uasset_toolkit::list_iostore_files(
         utoc_path.to_string_lossy().as_ref(),
         Some("0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74"),
-    ).map_err(|e| format!("Failed to read utoc: {}", e))?;
-    
+    )
+    .map_err(|e| format!("Failed to read utoc: {}", e))?;
+
     // Convert to UtocFileEntry format, normalizing paths to remove /../ patterns
-    let entries = result.files.iter().map(|file_path| {
-        let normalized = normalize_iostore_path(file_path);
-        UtocFileEntry {
-            file_path: normalized,
-            bulkdata_chunks: 0, // Not available from new API
-            packagedata_chunks: 0, // Not available from new API
-        }
-    }).collect();
-    
+    let entries = result
+        .files
+        .iter()
+        .map(|file_path| {
+            let normalized = normalize_iostore_path(file_path);
+            UtocFileEntry {
+                file_path: normalized,
+                bulkdata_chunks: 0,    // Not available from new API
+                packagedata_chunks: 0, // Not available from new API
+            }
+        })
+        .collect();
+
     Ok(entries)
 }
 
 /// Normalize IoStore paths to remove /../ patterns and convert to clean /Game/ paths
 fn normalize_iostore_path(path: &str) -> String {
     let mut result = path.to_string();
-    
+
     // Handle paths like "../../../Marvel_New/Content/Marvel/Characters/..."
     // These should become "/Game/Marvel/Characters/..."
     if result.contains("/../") {
         // Split by / and resolve .. segments
         let parts: Vec<&str> = result.split('/').collect();
         let mut resolved: Vec<&str> = Vec::new();
-        
+
         for part in parts {
             if part == ".." {
                 resolved.pop();
@@ -59,14 +64,14 @@ fn normalize_iostore_path(path: &str) -> String {
                 resolved.push(part);
             }
         }
-        
+
         result = format!("/{}", resolved.join("/"));
-        
+
         // Convert /Marvel_New/Content/... or /Marvel/Content/... to /Game/...
         if let Some(content_idx) = result.find("/Content/") {
             result = format!("/Game{}", &result[content_idx + "/Content".len()..]);
         }
     }
-    
+
     result
 }

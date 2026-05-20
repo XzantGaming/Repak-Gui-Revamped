@@ -195,45 +195,64 @@ export default function VfxUpdaterPanel() {
       '#FF96BC': ['#FF96BC', '#f472b6', '#c084fc', '#fda4af'],
     };
 
-    const applyTheme = () => {
-      const savedTheme = localStorage.getItem('theme') || 'dark';
-      const savedAccent = localStorage.getItem('accentColor') || '#4a9eff';
-      document.documentElement.setAttribute('data-theme', savedTheme);
-      document.documentElement.style.setProperty('--accent-primary', savedAccent);
-      document.documentElement.style.setProperty('--accent-secondary', savedAccent);
+    const ACCENT_COLORS_MAP: Record<string, string> = {
+      red: '#be1c1c',
+      blue: '#4a9eff',
+      purple: '#9c27b0',
+      green: '#4CAF50',
+      orange: '#ff9800',
+      pink: '#FF96BC'
+    };
 
-      const palette = AURORA_PALETTES[savedAccent] || ['#4a9eff', '#a855f7', '#ff6b9d', '#38bdf8'];
+    const applyTheme = (themeStr: string, accentStr: string) => {
+      const hexAccent = ACCENT_COLORS_MAP[accentStr] || accentStr || '#4a9eff';
+      document.documentElement.setAttribute('data-theme', themeStr);
+      document.documentElement.style.setProperty('--accent-primary', hexAccent);
+      document.documentElement.style.setProperty('--accent-secondary', hexAccent);
+
+      const palette = AURORA_PALETTES[hexAccent] || ['#4a9eff', '#a855f7', '#ff6b9d', '#38bdf8'];
       document.documentElement.style.setProperty('--aurora-color-1', palette[0]);
       document.documentElement.style.setProperty('--aurora-color-2', palette[1]);
       document.documentElement.style.setProperty('--aurora-color-3', palette[2]);
       document.documentElement.style.setProperty('--aurora-color-4', palette[3]);
     };
 
-    applyTheme();
+    // Load initial settings from backend
+    invoke('get_app_settings')
+      .then((settings: any) => {
+        applyTheme(settings.theme, settings.accentColor);
+      })
+      .catch(console.error);
 
-    // Re-sync when the main window changes theme settings
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === 'accentColor' || e.key === 'theme') {
-        if (document.startViewTransition) {
-          const x = window.innerWidth / 2;
-          const y = window.innerHeight / 2;
-          const maxRadius = Math.hypot(x, y);
+    // Listen for setting changes
+    let unlisten: (() => void) | null = null;
+    import('@tauri-apps/api/event').then(({ listen }) => {
+      listen('settings_changed', (event: any) => {
+        const settings = event.payload;
+        if (settings) {
+          if (document.startViewTransition) {
+            const x = window.innerWidth / 2;
+            const y = window.innerHeight / 2;
+            const maxRadius = Math.hypot(x, y);
 
-          document.documentElement.style.setProperty('--theme-toggle-x', `${x}px`);
-          document.documentElement.style.setProperty('--theme-toggle-y', `${y}px`);
-          document.documentElement.style.setProperty('--theme-toggle-radius', `${maxRadius}px`);
-          document.documentElement.style.setProperty('--theme-toggle-duration', `400ms`);
+            document.documentElement.style.setProperty('--theme-toggle-x', `${x}px`);
+            document.documentElement.style.setProperty('--theme-toggle-y', `${y}px`);
+            document.documentElement.style.setProperty('--theme-toggle-radius', `${maxRadius}px`);
+            document.documentElement.style.setProperty('--theme-toggle-duration', `400ms`);
 
-          document.startViewTransition(() => {
-            applyTheme();
-          });
-        } else {
-          applyTheme();
+            document.startViewTransition(() => {
+              applyTheme(settings.theme, settings.accentColor);
+            });
+          } else {
+            applyTheme(settings.theme, settings.accentColor);
+          }
         }
-      }
+      }).then(fn => { unlisten = fn; });
+    });
+
+    return () => {
+      if (unlisten) unlisten();
     };
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   // System Setup

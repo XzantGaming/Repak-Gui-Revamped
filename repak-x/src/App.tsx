@@ -80,6 +80,15 @@ const ACCENT_COLORS_MAP: Record<string, string> = {
   pink: '#FF96BC'
 };
 
+const AURORA_PALETTES: Record<string, string[]> = {
+  '#be1c1c': ['#be1c1c', '#ff9800', '#ffcc00', '#ff6b35'], // Repak Red: warm fire tones
+  '#4a9eff': ['#4a9eff', '#a855f7', '#ff6b9d', '#38bdf8'], // Blue: cool to pink
+  '#9c27b0': ['#9c27b0', '#e91e63', '#00bcd4', '#7c3aed'], // Purple: vibrant mix
+  '#4CAF50': ['#4CAF50', '#8bc34a', '#00e676', '#e91e63'], // Green: nature with pop
+  '#ff9800': ['#ff9800', '#ff5722', '#ffc107', '#4a9eff'], // Orange: sunset vibes
+  '#FF96BC': ['#FF96BC', '#f472b6', '#c084fc', '#fda4af'], // Pink: soft pastel tones
+};
+
 const VFX_UPDATER_MOD_PREFILL_KEY = 'repakx:vfxUpdater:modPath'
 
 import TitleBar from './components/TitleBar'
@@ -190,6 +199,9 @@ type InstallModPayload = ModRecord & {
 }
 
 type AppSettings = {
+  theme: string
+  accentColor: string
+  viewMode: string
   hideSuffix: boolean
   autoOpenDetails: boolean
   showHeroIcons: boolean
@@ -1090,7 +1102,17 @@ function App() {
   }
 
   useEffect(() => {
-    loadInitialData()
+    loadInitialData().then((modCount) => {
+      invoke('get_app_settings')
+        .then((settings: any) => {
+          if (settings.enableDrp) {
+            invoke('discord_connect')
+              .then(() => invoke('discord_set_managing_mods', { modCount }))
+              .catch(console.warn);
+          }
+        })
+        .catch(console.warn);
+    });
     loadTags()
 
     // Listen for install progress
@@ -1412,39 +1434,16 @@ function App() {
         console.error('Failed to fetch character data:', charErr)
       }
 
-      await loadMods()
+      const modList = await loadMods()
       await loadFolders()
       await checkGame()
 
-      // Fetch parallel processing status (experimental)
-      try {
-        const parallelStatus = await invoke('get_parallel_processing') as any
-        setParallelProcessing(parallelStatus)
-      } catch (err) {
-        console.warn('Failed to fetch parallel processing status (expected if backend missing):', err)
-      }
-
       // Start the file watcher
       await invoke('start_file_watcher')
-
-      // Load global app settings (DRP, etc)
-      try {
-        const settings = await invoke('get_drp_settings') as any
-        if (settings) {
-          if (settings.enable_drp !== undefined) {
-            setEnableDrp(settings.enable_drp)
-          }
-          if (settings.accent_color) {
-            setAccentColor(settings.accent_color)
-            // Also update the theme CSS variables immediately
-            handleAccentChange(settings.accent_color)
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load app settings:', err)
-      }
+      return modList.length
     } catch (error) {
       console.error('Failed to load initial data:', error)
+      return 0
     }
   }
 
@@ -1462,6 +1461,10 @@ function App() {
 
       // After loading mods, refresh details for each (with progress tracking)
       await preloadModDetails(modList)
+
+      if (enableDrp) {
+        invoke('discord_set_managing_mods', { modCount: modList.length }).catch(console.warn);
+      }
 
       setStatus(`Loaded ${modList.length} mod(s)`)
       return modList as ModRecord[]
@@ -2654,132 +2657,163 @@ function App() {
     )
   }
 
-  const handleSaveSettings = async (settings: AppSettings) => {
-    setHideSuffix(settings.hideSuffix)
-    setAutoOpenDetails(settings.autoOpenDetails)
-    setShowHeroIcons(settings.showHeroIcons)
-    setShowHeroBg(settings.showHeroBg)
-    setShowModType(settings.showModType)
-    setShowExperimental(settings.showExperimental)
-    setAutoCheckUpdates(settings.autoCheckUpdates)
-    setEnableDrp(settings.enableDrp)
-    setBypassGameRunningLock(settings.bypassGameRunningLock)
+  const saveAllSettings = async (overrides: Partial<AppSettings>) => {
+    // 1. Determine new values (merging overrides with current React state)
+    const newTheme = overrides.theme !== undefined ? overrides.theme : theme;
+    const newAccentColor = overrides.accentColor !== undefined ? overrides.accentColor : accentColor;
+    const newViewMode = (overrides.viewMode !== undefined ? overrides.viewMode : viewMode) as ViewMode;
+    const newHideSuffix = overrides.hideSuffix !== undefined ? overrides.hideSuffix : hideSuffix;
+    const newAutoOpenDetails = overrides.autoOpenDetails !== undefined ? overrides.autoOpenDetails : autoOpenDetails;
+    const newShowHeroIcons = overrides.showHeroIcons !== undefined ? overrides.showHeroIcons : showHeroIcons;
+    const newShowHeroBg = overrides.showHeroBg !== undefined ? overrides.showHeroBg : showHeroBg;
+    const newShowModType = overrides.showModType !== undefined ? overrides.showModType : showModType;
+    const newShowExperimental = overrides.showExperimental !== undefined ? overrides.showExperimental : showExperimental;
+    const newEnableDrp = overrides.enableDrp !== undefined ? overrides.enableDrp : enableDrp;
+    const newParallelProcessing = overrides.parallelProcessing !== undefined ? overrides.parallelProcessing : parallelProcessing;
+    const newAutoCheckUpdates = overrides.autoCheckUpdates !== undefined ? overrides.autoCheckUpdates : autoCheckUpdates;
+    const newHoldToDelete = overrides.holdToDelete !== undefined ? overrides.holdToDelete : holdToDelete;
+    const newShowSubfolderMods = overrides.showSubfolderMods !== undefined ? overrides.showSubfolderMods : showSubfolderMods;
+    const newBypassGameRunningLock = overrides.bypassGameRunningLock !== undefined ? overrides.bypassGameRunningLock : bypassGameRunningLock;
 
-    // Handle DRP toggle
-    if (settings.enableDrp && !enableDrp) {
-      // Turned ON
+    // 2. Map newAccentColor from hex to the preset name if it is a hex value
+    const accentName = Object.keys(ACCENT_COLORS_MAP).find(key => ACCENT_COLORS_MAP[key] === newAccentColor) || newAccentColor;
+
+    // 3. Construct the payload for save_app_settings
+    const payload: AppSettings = {
+      theme: newTheme,
+      accentColor: accentName,
+      viewMode: newViewMode,
+      hideSuffix: newHideSuffix,
+      autoOpenDetails: newAutoOpenDetails,
+      showHeroIcons: newShowHeroIcons,
+      showHeroBg: newShowHeroBg,
+      showModType: newShowModType,
+      showExperimental: newShowExperimental,
+      enableDrp: newEnableDrp,
+      parallelProcessing: newParallelProcessing,
+      autoCheckUpdates: newAutoCheckUpdates,
+      holdToDelete: newHoldToDelete,
+      showSubfolderMods: newShowSubfolderMods,
+      bypassGameRunningLock: newBypassGameRunningLock,
+    };
+
+    // 4. Save to backend
+    await invoke('save_app_settings', { settings: payload }).catch(console.warn);
+
+    // 5. Update React states immediately
+    if (overrides.theme !== undefined) {
+      setTheme(newTheme);
+      document.documentElement.setAttribute('data-theme', newTheme);
+    }
+    if (overrides.accentColor !== undefined) {
+      setAccentColor(newAccentColor);
+      document.documentElement.style.setProperty('--accent-primary', newAccentColor);
+      document.documentElement.style.setProperty('--accent-secondary', newAccentColor);
+      const palette = AURORA_PALETTES[newAccentColor] || ['#be1c1c', '#ff9800', '#ffcc00', '#ff6b35'];
+      document.documentElement.style.setProperty('--aurora-color-1', palette[0]);
+      document.documentElement.style.setProperty('--aurora-color-2', palette[1]);
+      document.documentElement.style.setProperty('--aurora-color-3', palette[2]);
+      document.documentElement.style.setProperty('--aurora-color-4', palette[3]);
+    }
+    if (overrides.viewMode !== undefined) {
+      setViewMode(newViewMode);
+    }
+    if (overrides.hideSuffix !== undefined) setHideSuffix(newHideSuffix);
+    if (overrides.autoOpenDetails !== undefined) setAutoOpenDetails(newAutoOpenDetails);
+    if (overrides.showHeroIcons !== undefined) setShowHeroIcons(newShowHeroIcons);
+    if (overrides.showHeroBg !== undefined) setShowHeroBg(newShowHeroBg);
+    if (overrides.showModType !== undefined) setShowModType(newShowModType);
+    if (overrides.showExperimental !== undefined) setShowExperimental(newShowExperimental);
+    if (overrides.enableDrp !== undefined) setEnableDrp(newEnableDrp);
+    if (overrides.parallelProcessing !== undefined) setParallelProcessing(newParallelProcessing);
+    if (overrides.autoCheckUpdates !== undefined) setAutoCheckUpdates(newAutoCheckUpdates);
+    if (overrides.holdToDelete !== undefined) setHoldToDelete(newHoldToDelete);
+    if (overrides.showSubfolderMods !== undefined) setShowSubfolderMods(newShowSubfolderMods);
+    if (overrides.bypassGameRunningLock !== undefined) setBypassGameRunningLock(newBypassGameRunningLock);
+
+    // 6. Handle side effects (DRP connection, theme, etc.)
+    if (newEnableDrp && !enableDrp) {
       invoke('discord_connect')
-        .then(() => invoke('discord_set_managing_mods', { modCount: mods.flat().length })) // simplistic count, assumes mods is array. wait, mods is array.
-        .catch(console.warn)
-    } else if (!settings.enableDrp && enableDrp) {
-      // Turned OFF
-      invoke('discord_disconnect').catch(console.warn)
+        .then(() => invoke('discord_set_managing_mods', { modCount: mods.flat().length }))
+        .catch(console.warn);
+    } else if (!newEnableDrp && enableDrp) {
+      invoke('discord_disconnect').catch(console.warn);
     }
 
-    // Handle Theme Change for DRP
-    if (settings.enableDrp || (settings.enableDrp && !enableDrp)) {
-      // Find color name
-      const themeName = Object.keys(ACCENT_COLORS_MAP).find(key => ACCENT_COLORS_MAP[key] === accentColor) || 'blue'
-      invoke('discord_set_theme', { theme: themeName }).catch(console.warn)
+    if (newEnableDrp) {
+      invoke('discord_set_theme', { theme: accentName }).catch(console.warn);
     }
 
-    // Save to localStorage for persistence
-    localStorage.setItem('hideSuffix', JSON.stringify(settings.hideSuffix || false))
-    localStorage.setItem('autoOpenDetails', JSON.stringify(settings.autoOpenDetails || false))
-    localStorage.setItem('showHeroIcons', JSON.stringify(settings.showHeroIcons || false))
-    localStorage.setItem('showHeroBg', JSON.stringify(settings.showHeroBg || false))
-    localStorage.setItem('showModType', JSON.stringify(settings.showModType || false))
-    localStorage.setItem('showExperimental', JSON.stringify(settings.showExperimental || false))
-    localStorage.setItem('autoCheckUpdates', JSON.stringify(settings.autoCheckUpdates || false))
-    console.debug('[Settings] Saved autoCheckUpdates preference', { autoCheckUpdates: settings.autoCheckUpdates })
-    localStorage.setItem('parallelProcessing', JSON.stringify(settings.parallelProcessing || false))
-    localStorage.setItem('holdToDelete', JSON.stringify(settings.holdToDelete !== false))
-    localStorage.setItem('showSubfolderMods', JSON.stringify(settings.showSubfolderMods !== false))
-    localStorage.setItem('bypassGameRunningLock', JSON.stringify(settings.bypassGameRunningLock || false))
-    console.debug('[Settings] Saved holdToDelete preference', {
-      requestedHoldToDelete: settings.holdToDelete,
-      normalizedHoldToDelete: settings.holdToDelete !== false,
-      persistedHoldToDeleteRaw: localStorage.getItem('holdToDelete')
-    })
-    console.debug('[Settings] Saved bypassGameRunningLock preference', {
-      bypassGameRunningLock: settings.bypassGameRunningLock,
-      persistedBypassGameRunningLockRaw: localStorage.getItem('bypassGameRunningLock')
-    })
-
-    // Apply hold to delete setting
-    setHoldToDelete(settings.holdToDelete !== false)
-    setShowSubfolderMods(settings.showSubfolderMods !== false)
-
-    await invoke('save_drp_settings', {
-      settings: {
-        enable_drp: settings.enableDrp,
-        accent_color: accentColor
-      }
-    }).catch(console.warn)
-
-    // Apply parallel processing setting (if changed)
-    if (settings.parallelProcessing !== parallelProcessing) {
-      handleSetParallelProcessing(settings.parallelProcessing)
+    if (overrides.parallelProcessing !== undefined && newParallelProcessing !== parallelProcessing) {
+      handleSetParallelProcessing(newParallelProcessing);
     }
 
-    // Revert to normal list view if disabling experimental features while in compact list
-    if (settings.showExperimental === false && viewMode === 'list-compact') {
-      handleViewModeChange('list')
+    if (newShowExperimental === false && newViewMode === 'list-compact') {
+      setViewMode('list');
+      await invoke('save_app_settings', { settings: { ...payload, viewMode: 'list' } }).catch(console.warn);
     }
+  };
 
-    setStatus('Settings saved')
+  const handleSaveSettings = async (settings: Partial<AppSettings>) => {
+    await saveAllSettings(settings);
+    setStatus('Settings saved');
   }
 
   // Add this effect to initialize theme and view settings
   useEffect(() => {
-    const savedTheme = localStorage.getItem('theme') || 'dark';
-    const savedAccent = localStorage.getItem('accentColor') || '#4a9eff';
-    const savedViewMode = localStorage.getItem('viewMode') || 'list';
+    // Load App Settings from backend state.json
+    invoke('get_app_settings')
+      .then((settings: any) => {
+        // Resolve hex code from accent preset name
+        const hexAccent = ACCENT_COLORS_MAP[settings.accentColor] || ACCENT_COLORS_MAP['red'] || '#be1c1c';
+        
+        // 1. Apply Theme
+        setTheme(settings.theme);
+        document.documentElement.setAttribute('data-theme', settings.theme);
 
-    // Load Mods View Settings
-    const savedHideSuffix = JSON.parse(localStorage.getItem('hideSuffix') || 'false');
-    const savedAutoOpenDetails = JSON.parse(localStorage.getItem('autoOpenDetails') || 'false');
-    const savedShowHeroIcons = JSON.parse(localStorage.getItem('showHeroIcons') || 'false');
-    const savedShowHeroBg = JSON.parse(localStorage.getItem('showHeroBg') || 'false');
-    const savedShowModType = JSON.parse(localStorage.getItem('showModType') || 'false');
-    const savedShowExperimental = JSON.parse(localStorage.getItem('showExperimental') || 'false');
-    const savedAutoCheckUpdates = JSON.parse(localStorage.getItem('autoCheckUpdates') ?? 'true');
-    const savedParallelProcessing = JSON.parse(localStorage.getItem('parallelProcessing') || 'false');
-    const savedHoldToDelete = JSON.parse(localStorage.getItem('holdToDelete') ?? 'true');
-    const savedShowSubfolderMods = JSON.parse(localStorage.getItem('showSubfolderMods') ?? 'true');
-    const savedBypassGameRunningLock = JSON.parse(localStorage.getItem('bypassGameRunningLock') || 'false');
-    handleThemeChange(savedTheme);
-    handleAccentChange(savedAccent);
-    console.debug('[Settings] Startup preferences snapshot', {
-      holdToDeleteRaw: localStorage.getItem('holdToDelete'),
-      holdToDeleteNormalized: savedHoldToDelete,
-      bypassGameRunningLockRaw: localStorage.getItem('bypassGameRunningLock'),
-      bypassGameRunningLockNormalized: savedBypassGameRunningLock,
-    })
-    const parsedViewMode: ViewMode =
-      savedViewMode === 'grid' || savedViewMode === 'compact' || savedViewMode === 'list-compact'
-        ? savedViewMode
-        : 'list'
-    setViewMode(parsedViewMode);
-    setHideSuffix(savedHideSuffix);
-    setAutoOpenDetails(savedAutoOpenDetails);
-    setShowHeroIcons(savedShowHeroIcons);
-    setShowHeroBg(savedShowHeroBg);
-    setShowModType(savedShowModType);
-    setShowExperimental(savedShowExperimental);
-    setAutoCheckUpdates(savedAutoCheckUpdates);
-    console.debug('[Settings] Loaded autoCheckUpdates preference', { autoCheckUpdates: savedAutoCheckUpdates });
-    setParallelProcessing(savedParallelProcessing);
-    setHoldToDelete(savedHoldToDelete);
-    setShowSubfolderMods(savedShowSubfolderMods);
-    setBypassGameRunningLock(savedBypassGameRunningLock);
+        // 2. Apply Accent
+        setAccentColor(hexAccent);
+        document.documentElement.style.setProperty('--accent-primary', hexAccent);
+        document.documentElement.style.setProperty('--accent-secondary', hexAccent);
+        const palette = AURORA_PALETTES[hexAccent] || ['#be1c1c', '#ff9800', '#ffcc00', '#ff6b35'];
+        document.documentElement.style.setProperty('--aurora-color-1', palette[0]);
+        document.documentElement.style.setProperty('--aurora-color-2', palette[1]);
+        document.documentElement.style.setProperty('--aurora-color-3', palette[2]);
+        document.documentElement.style.setProperty('--aurora-color-4', palette[3]);
 
-    if (savedAutoCheckUpdates) {
-      console.debug('[Updates] Running startup auto-check for updates');
-      void handleCheckForUpdates(true);
-    } else {
-      console.debug('[Updates] Skipping startup auto-check (disabled in settings)');
-    }
+        // 3. Apply ViewMode
+        const parsedViewMode: ViewMode =
+          settings.viewMode === 'grid' || settings.viewMode === 'compact' || settings.viewMode === 'list-compact'
+            ? settings.viewMode
+            : 'list';
+        setViewMode(parsedViewMode);
+
+        // 4. Apply all other settings
+        setHideSuffix(settings.hideSuffix);
+        setAutoOpenDetails(settings.autoOpenDetails);
+        setShowHeroIcons(settings.showHeroIcons);
+        setShowHeroBg(settings.showHeroBg);
+        setShowModType(settings.showModType);
+        setShowExperimental(settings.showExperimental);
+        setAutoCheckUpdates(settings.autoCheckUpdates);
+        setParallelProcessing(settings.parallelProcessing);
+        setHoldToDelete(settings.holdToDelete);
+        setShowSubfolderMods(settings.showSubfolderMods);
+        setBypassGameRunningLock(settings.bypassGameRunningLock);
+        setBypassGameRunningLock(settings.bypassGameRunningLock);
+        setEnableDrp(settings.enableDrp);
+
+        // 5. Run auto update check if enabled
+        if (settings.autoCheckUpdates) {
+          console.debug('[Updates] Running startup auto-check for updates');
+          void handleCheckForUpdates(true);
+        } else {
+          console.debug('[Updates] Skipping startup auto-check (disabled in settings)');
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load app settings from backend:', err);
+      });
 
     const hasSeenTour = localStorage.getItem('hasSeenOnboarding');
     if (!hasSeenTour) {
@@ -2790,37 +2824,15 @@ function App() {
 
   // Add these handlers
   const handleThemeChange = (newTheme: string) => {
-    setTheme(newTheme);
-    document.documentElement.setAttribute('data-theme', newTheme);
-    localStorage.setItem('theme', newTheme);
-  };
-
-  // 4-color palettes for aurora gradient animation
-  const AURORA_PALETTES: Record<string, string[]> = {
-    '#be1c1c': ['#be1c1c', '#ff9800', '#ffcc00', '#ff6b35'], // Repak Red: warm fire tones
-    '#4a9eff': ['#4a9eff', '#a855f7', '#ff6b9d', '#38bdf8'], // Blue: cool to pink
-    '#9c27b0': ['#9c27b0', '#e91e63', '#00bcd4', '#7c3aed'], // Purple: vibrant mix
-    '#4CAF50': ['#4CAF50', '#8bc34a', '#00e676', '#e91e63'], // Green: nature with pop
-    '#ff9800': ['#ff9800', '#ff5722', '#ffc107', '#4a9eff'], // Orange: sunset vibes
-    '#FF96BC': ['#FF96BC', '#f472b6', '#c084fc', '#fda4af'], // Pink: soft pastel tones
+    saveAllSettings({ theme: newTheme });
   };
 
   const handleAccentChange = (newAccent: string) => {
-    setAccentColor(newAccent);
-    document.documentElement.style.setProperty('--accent-primary', newAccent);
-    document.documentElement.style.setProperty('--accent-secondary', newAccent);
-    // Set 4-color aurora palette for gradient animations
-    const palette = AURORA_PALETTES[newAccent] || ['#be1c1c', '#ff9800', '#ffcc00', '#ff6b35'];
-    document.documentElement.style.setProperty('--aurora-color-1', palette[0]);
-    document.documentElement.style.setProperty('--aurora-color-2', palette[1]);
-    document.documentElement.style.setProperty('--aurora-color-3', palette[2]);
-    document.documentElement.style.setProperty('--aurora-color-4', palette[3]);
-    localStorage.setItem('accentColor', newAccent);
+    saveAllSettings({ accentColor: newAccent });
   };
 
   const handleViewModeChange = (newMode: ViewMode) => {
-    setViewMode(newMode);
-    localStorage.setItem('viewMode', newMode);
+    saveAllSettings({ viewMode: newMode });
   };
 
   const handleCloseTour = () => {

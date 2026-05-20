@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 //! Secure P2P Mod Sharing Module
-//! 
+//!
 //! Provides secure peer-to-peer mod pack sharing functionality with:
 //! - AES-256-GCM encryption for all transfers
 //! - SHA256 integrity verification
@@ -124,9 +124,7 @@ enum P2PMessage {
         pack_info: ShareableModPack,
     },
     /// Request to download a file
-    RequestFile {
-        filename: String,
-    },
+    RequestFile { filename: String },
     /// File data chunk
     FileChunk {
         filename: String,
@@ -135,14 +133,9 @@ enum P2PMessage {
         is_last: bool,
     },
     /// Transfer complete
-    TransferComplete {
-        filename: String,
-        hash: String,
-    },
+    TransferComplete { filename: String, hash: String },
     /// Error message
-    Error {
-        message: String,
-    },
+    Error { message: String },
     /// Acknowledge receipt
     Ack,
     /// Session ended
@@ -276,12 +269,7 @@ pub fn generate_share_code() -> String {
 
 /// Creates a full connection string from components
 /// Format: share_code:key_base64:ip:port
-pub fn create_connection_string(
-    share_code: &str,
-    key: &[u8; 32],
-    ip: &str,
-    port: u16,
-) -> String {
+pub fn create_connection_string(share_code: &str, key: &[u8; 32], ip: &str, port: u16) -> String {
     let key_b64 = URL_SAFE_NO_PAD.encode(key);
     format!("{}:{}:{}:{}", share_code, key_b64, ip, port)
 }
@@ -309,7 +297,7 @@ pub fn parse_connection_string(conn_str: &str) -> P2PResult<(String, [u8; 32], S
     }
 
     let share_code = parts[0].to_string();
-    
+
     let key_bytes = URL_SAFE_NO_PAD
         .decode(parts[1])
         .map_err(|e| P2PError::ValidationError(format!("Invalid key encoding: {}", e)))?;
@@ -335,9 +323,9 @@ pub fn parse_connection_string(conn_str: &str) -> P2PResult<(String, [u8; 32], S
 
 /// Calculate SHA256 hash of a file
 pub fn hash_file(path: &Path) -> P2PResult<String> {
-    let file = File::open(path)
-        .map_err(|e| P2PError::FileError(format!("Failed to open file: {}", e)))?;
-    
+    let file =
+        File::open(path).map_err(|e| P2PError::FileError(format!("Failed to open file: {}", e)))?;
+
     let mut reader = BufReader::new(file);
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; CHUNK_SIZE];
@@ -403,8 +391,9 @@ pub fn create_mod_pack(
         for ext in &["ucas", "utoc"] {
             let companion = base_path.with_extension(ext);
             if companion.exists() {
-                let comp_meta = fs::metadata(&companion)
-                    .map_err(|e| P2PError::FileError(format!("Failed to get companion metadata: {}", e)))?;
+                let comp_meta = fs::metadata(&companion).map_err(|e| {
+                    P2PError::FileError(format!("Failed to get companion metadata: {}", e))
+                })?;
                 let comp_hash = hash_file(&companion)?;
                 iostore_files.push(IoStoreFile {
                     extension: ext.to_string(),
@@ -463,7 +452,10 @@ pub fn create_mod_pack_preview(
             file_count += 1;
         }
     }
-    Ok(PackPreview { total_size, file_count })
+    Ok(PackPreview {
+        total_size,
+        file_count,
+    })
 }
 
 /// Active share session manager
@@ -498,9 +490,8 @@ impl P2PServer {
             }
         }
 
-        let listener = listener.ok_or_else(|| {
-            P2PError::NetworkError("No available ports in range".to_string())
-        })?;
+        let listener = listener
+            .ok_or_else(|| P2PError::NetworkError("No available ports in range".to_string()))?;
 
         // Get local IP
         let local_ip = local_ip_address::local_ip()
@@ -510,8 +501,10 @@ impl P2PServer {
         // Generate share code
         let share_code = generate_share_code();
         let key_b64 = URL_SAFE_NO_PAD.encode(&encryption_key);
-        let connection_string = create_connection_string(&share_code, &encryption_key, &local_ip, port);
-        let obfuscated_connection_string = create_obfuscated_connection_string(&share_code, &encryption_key, &local_ip, port);
+        let connection_string =
+            create_connection_string(&share_code, &encryption_key, &local_ip, port);
+        let obfuscated_connection_string =
+            create_obfuscated_connection_string(&share_code, &encryption_key, &local_ip, port);
 
         // Build path map (keys are normalized .pak filenames to match share metadata)
         let mut path_map = HashMap::new();
@@ -524,7 +517,7 @@ impl P2PServer {
                     raw_name.to_string()
                 };
                 path_map.insert(key, path.clone());
-                
+
                 // Also add IoStore files
                 let base_path = path.with_extension("");
                 for ext in &["ucas", "utoc"] {
@@ -549,7 +542,10 @@ impl P2PServer {
             active: true,
         };
 
-        info!("P2P Server created on port {} with code {}", port, session.share_code);
+        info!(
+            "P2P Server created on port {} with code {}",
+            port, session.share_code
+        );
 
         Ok(Self {
             listener: Some(listener),
@@ -579,9 +575,10 @@ impl P2PServer {
 
     /// Start accepting connections (blocking)
     pub fn run(&mut self) -> P2PResult<()> {
-        let listener = self.listener.take().ok_or_else(|| {
-            P2PError::NetworkError("Server already started".to_string())
-        })?;
+        let listener = self
+            .listener
+            .take()
+            .ok_or_else(|| P2PError::NetworkError("Server already started".to_string()))?;
 
         listener
             .set_nonblocking(true)
@@ -663,7 +660,10 @@ impl P2PServer {
             .map_err(|e| P2PError::ProtocolError(format!("Invalid hello message: {}", e)))?;
 
         match hello {
-            P2PMessage::Hello { protocol_version, client_name } => {
+            P2PMessage::Hello {
+                protocol_version,
+                client_name,
+            } => {
                 if protocol_version != PROTOCOL_VERSION {
                     let error = P2PMessage::Error {
                         message: format!(
@@ -686,7 +686,9 @@ impl P2PServer {
                 info!("[Server] Welcome sent, entering file-request loop");
             }
             _ => {
-                return Err(P2PError::ProtocolError("Expected Hello message".to_string()));
+                return Err(P2PError::ProtocolError(
+                    "Expected Hello message".to_string(),
+                ));
             }
         }
 
@@ -727,13 +729,15 @@ impl P2PServer {
 
     /// Send a file to the client
     fn send_file(&self, stream: &mut TcpStream, filename: &str) -> P2PResult<()> {
-        let path = self.mod_paths.get(filename).ok_or_else(|| {
-            P2PError::FileError(format!("File not found: {}", filename))
-        })?;
+        let path = self
+            .mod_paths
+            .get(filename)
+            .ok_or_else(|| P2PError::FileError(format!("File not found: {}", filename)))?;
 
         let file = File::open(path)
             .map_err(|e| P2PError::FileError(format!("Failed to open file: {}", e)))?;
-        let file_size = file.metadata()
+        let file_size = file
+            .metadata()
             .map_err(|e| P2PError::FileError(format!("Failed to get file size: {}", e)))?
             .len();
 
@@ -857,7 +861,11 @@ impl P2PClient {
     }
 
     /// Connect and download all mods to the specified directory
-    pub fn download_pack(&self, output_dir: &Path, client_name: Option<String>) -> P2PResult<ShareableModPack> {
+    pub fn download_pack(
+        &self,
+        output_dir: &Path,
+        client_name: Option<String>,
+    ) -> P2PResult<ShareableModPack> {
         // Update progress
         {
             let mut progress = self.progress.lock().unwrap();
@@ -898,9 +906,14 @@ impl P2PClient {
             .map_err(|e| P2PError::ProtocolError(format!("Invalid welcome: {}", e)))?;
 
         let pack_info = match welcome {
-            P2PMessage::Welcome { protocol_version, pack_info } => {
+            P2PMessage::Welcome {
+                protocol_version,
+                pack_info,
+            } => {
                 if protocol_version != PROTOCOL_VERSION {
-                    return Err(P2PError::ProtocolError("Protocol version mismatch".to_string()));
+                    return Err(P2PError::ProtocolError(
+                        "Protocol version mismatch".to_string(),
+                    ));
                 }
                 pack_info
             }
@@ -908,7 +921,9 @@ impl P2PClient {
                 return Err(P2PError::ProtocolError(message));
             }
             _ => {
-                return Err(P2PError::ProtocolError("Expected Welcome message".to_string()));
+                return Err(P2PError::ProtocolError(
+                    "Expected Welcome message".to_string(),
+                ));
             }
         };
 
@@ -938,8 +953,9 @@ impl P2PClient {
         }
 
         // Create output directory if needed
-        fs::create_dir_all(output_dir)
-            .map_err(|e| P2PError::FileError(format!("Failed to create output directory: {}", e)))?;
+        fs::create_dir_all(output_dir).map_err(|e| {
+            P2PError::FileError(format!("Failed to create output directory: {}", e))
+        })?;
 
         // Download each file
         let mut files_completed = 0usize;
@@ -951,12 +967,8 @@ impl P2PClient {
             }
 
             // Download main .pak file
-            let downloaded_bytes = self.download_file(
-                &mut stream,
-                &mod_info.filename,
-                &mod_info.hash,
-                output_dir,
-            )?;
+            let downloaded_bytes =
+                self.download_file(&mut stream, &mod_info.filename, &mod_info.hash, output_dir)?;
             bytes_transferred += downloaded_bytes;
             files_completed += 1;
 
@@ -972,15 +984,12 @@ impl P2PClient {
                     return Err(P2PError::Cancelled);
                 }
 
-                let io_filename = mod_info.filename
+                let io_filename = mod_info
+                    .filename
                     .replace(".pak", &format!(".{}", io_file.extension));
 
-                let downloaded_bytes = self.download_file(
-                    &mut stream,
-                    &io_filename,
-                    &io_file.hash,
-                    output_dir,
-                )?;
+                let downloaded_bytes =
+                    self.download_file(&mut stream, &io_filename, &io_file.hash, output_dir)?;
                 bytes_transferred += downloaded_bytes;
                 files_completed += 1;
 
@@ -1041,7 +1050,12 @@ impl P2PClient {
                 .map_err(|e| P2PError::ProtocolError(format!("Invalid chunk: {}", e)))?;
 
             match msg {
-                P2PMessage::FileChunk { filename: _, offset: _, data, is_last } => {
+                P2PMessage::FileChunk {
+                    filename: _,
+                    offset: _,
+                    data,
+                    is_last,
+                } => {
                     hasher.update(&data);
                     writer
                         .write_all(&data)
@@ -1090,11 +1104,16 @@ impl P2PClient {
                 }
             }
             _ => {
-                return Err(P2PError::ProtocolError("Expected TransferComplete".to_string()));
+                return Err(P2PError::ProtocolError(
+                    "Expected TransferComplete".to_string(),
+                ));
             }
         }
 
-        info!("Downloaded and verified: {} ({} bytes)", filename, total_received);
+        info!(
+            "Downloaded and verified: {} ({} bytes)",
+            filename, total_received
+        );
         Ok(total_received)
     }
 }
@@ -1263,9 +1282,9 @@ impl P2PManager {
 
     /// Get current share session info
     pub fn get_share_session(&self) -> Option<ShareSession> {
-        self.active_server.as_ref().and_then(|s| {
-            s.lock().ok().map(|server| server.get_session())
-        })
+        self.active_server
+            .as_ref()
+            .and_then(|s| s.lock().ok().map(|server| server.get_session()))
     }
 
     /// Check if currently sharing
@@ -1286,9 +1305,7 @@ impl P2PManager {
         let client = Arc::new(P2PClient::from_connection_string(connection_string)?);
         let client_clone = client.clone();
 
-        let handle = thread::spawn(move || {
-            client_clone.download_pack(&output_dir, client_name)
-        });
+        let handle = thread::spawn(move || client_clone.download_pack(&output_dir, client_name));
 
         self.active_client = Some(client);
         self.client_thread = Some(handle);
@@ -1322,7 +1339,11 @@ impl P2PManager {
         if let Some(handle) = self.client_thread.take() {
             if handle.is_finished() {
                 self.active_client = None;
-                return Some(handle.join().unwrap_or(Err(P2PError::NetworkError("Thread panicked".to_string()))));
+                return Some(
+                    handle
+                        .join()
+                        .unwrap_or(Err(P2PError::NetworkError("Thread panicked".to_string()))),
+                );
             } else {
                 self.client_thread = Some(handle);
             }

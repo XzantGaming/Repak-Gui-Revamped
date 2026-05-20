@@ -106,74 +106,93 @@ pub fn emit_success(window: &Window, title: impl Into<String>, description: impl
 
 /// Emit installation failed error
 pub fn emit_installation_failed(window: &Window, error: &str) {
-    emit_toast(window, ToastPayload::error(
-        "Installation Failed",
-        format!("Could not install mod: {}", error)
-    ).persistent());
+    emit_toast(
+        window,
+        ToastPayload::error(
+            "Installation Failed",
+            format!("Could not install mod: {}", error),
+        )
+        .persistent(),
+    );
 }
 
 /// Emit mod toggle failed error
 pub fn emit_toggle_failed(window: &Window, error: &str) {
-    emit_toast(window, ToastPayload::error(
-        "Toggle Failed",
-        format!("Could not enable/disable mod: {}", error)
-    ));
+    emit_toast(
+        window,
+        ToastPayload::error(
+            "Toggle Failed",
+            format!("Could not enable/disable mod: {}", error),
+        ),
+    );
 }
 
 /// Emit mod delete failed error
 pub fn emit_delete_failed(window: &Window, error: &str) {
-    emit_toast(window, ToastPayload::error(
-        "Delete Failed",
-        format!("Could not remove mod: {}", error)
-    ));
+    emit_toast(
+        window,
+        ToastPayload::error("Delete Failed", format!("Could not remove mod: {}", error)),
+    );
 }
 
 /// Emit mod rename failed error
 pub fn emit_rename_failed(window: &Window, error: &str) {
-    emit_toast(window, ToastPayload::error(
-        "Rename Failed",
-        format!("Could not rename mod: {}", error)
-    ));
+    emit_toast(
+        window,
+        ToastPayload::error("Rename Failed", format!("Could not rename mod: {}", error)),
+    );
 }
 
 /// Emit folder creation failed error
 pub fn emit_folder_create_failed(window: &Window, error: &str) {
-    emit_toast(window, ToastPayload::error(
-        "Folder Error",
-        format!("Could not create folder: {}", error)
-    ));
+    emit_toast(
+        window,
+        ToastPayload::error(
+            "Folder Error",
+            format!("Could not create folder: {}", error),
+        ),
+    );
 }
 
 /// Emit folder delete failed error
 pub fn emit_folder_delete_failed(window: &Window, error: &str) {
-    emit_toast(window, ToastPayload::error(
-        "Delete Failed",
-        format!("Could not remove folder: {}", error)
-    ));
+    emit_toast(
+        window,
+        ToastPayload::error(
+            "Delete Failed",
+            format!("Could not remove folder: {}", error),
+        ),
+    );
 }
 
 /// Emit folder rename failed error
 pub fn emit_folder_rename_failed(window: &Window, error: &str) {
-    emit_toast(window, ToastPayload::error(
-        "Rename Failed",
-        format!("Could not rename folder: {}", error)
-    ));
+    emit_toast(
+        window,
+        ToastPayload::error(
+            "Rename Failed",
+            format!("Could not rename folder: {}", error),
+        ),
+    );
 }
 
 /// Emit mod move failed error
 pub fn emit_move_failed(window: &Window, error: &str) {
-    emit_toast(window, ToastPayload::error(
-        "Move Failed",
-        format!("Could not move mod: {}", error)
-    ));
+    emit_toast(
+        window,
+        ToastPayload::error("Move Failed", format!("Could not move mod: {}", error)),
+    );
 }
 
 /// Emit game path detection failed error
 pub fn emit_game_path_failed(window: &Window, error: &str) {
-    emit_toast(window, ToastPayload::error(
-        "Detection Failed",
-        format!("Could not auto-detect game path: {}", error)
-    ));
+    emit_toast(
+        window,
+        ToastPayload::error(
+            "Detection Failed",
+            format!("Could not auto-detect game path: {}", error),
+        ),
+    );
 }
 
 // ============================================================================
@@ -221,30 +240,31 @@ pub fn emit_crash_detected(
 ) {
     // Build a user-friendly description
     let mut description = String::new();
-    
+
     if let Some(ref err_type) = crash_type {
         description.push_str(&format!("Error: {}", err_type));
     }
-    
+
     if let Some(ref asset) = asset_path {
         if !description.is_empty() {
             description.push_str("\n");
         }
         description.push_str(&format!("Asset: {}", asset));
     }
-    
+
     if let Some(ref detail) = details {
         if !description.is_empty() {
             description.push_str("\n");
         }
         description.push_str(detail);
     }
-    
-    
+
     if description.is_empty() {
-        description = error_message.clone().unwrap_or_else(|| "Unknown crash error".to_string());
+        description = error_message
+            .clone()
+            .unwrap_or_else(|| "Unknown crash error".to_string());
     }
-    
+
     let payload = CrashToastPayload {
         base: ToastPayload {
             toast_type: ToastType::Danger,
@@ -261,24 +281,21 @@ pub fn emit_crash_detected(
         seconds_in_game,
         crash_folder,
     };
-    
+
     if let Err(e) = window.emit(CRASH_EVENT, &payload) {
         log::error!("Failed to emit crash notification: {}", e);
     }
 }
 
 /// Emit a crash notification from CrashInfo struct
-pub fn emit_crash_from_info(
-    window: &Window,
-    crash_info: &crate::crash_monitor::CrashInfo,
-) {
+pub fn emit_crash_from_info(window: &Window, crash_info: &crate::crash_monitor::CrashInfo) {
     let error_msg = crash_info.error_message.clone().unwrap_or_default();
-    
+
     // Parse error details
     let (asset_path, error_type, details) = crate::crash_monitor::parse_error_details(&error_msg);
     let character_id = crate::crash_monitor::extract_character_id(&error_msg);
     let is_mesh_crash = crate::crash_monitor::is_mesh_related_crash(&error_msg);
-    
+
     emit_crash_detected(
         window,
         crash_info.error_message.clone(),

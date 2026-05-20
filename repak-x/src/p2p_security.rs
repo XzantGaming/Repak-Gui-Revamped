@@ -8,12 +8,12 @@
 //! 4. Peer reputation tracking
 //! 5. Rate limiting and abuse prevention
 
-use sha2::{Digest, Sha256};
+use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-use log::{warn, error, info};
 
 // ============================================================================
 // MERKLE TREE FOR CHUNK VERIFICATION
@@ -140,10 +140,8 @@ impl SignedModPack {
         private_key: &[u8],
     ) -> Result<Self, Box<dyn std::error::Error>> {
         use sha2::Sha256;
-        
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_secs();
+
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
         // Create message to sign: pack_data + peer_id + timestamp
         let mut message = Vec::new();
@@ -192,7 +190,7 @@ impl SignedModPack {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         now - self.signed_at <= max_age_seconds
     }
 }
@@ -264,13 +262,13 @@ impl PeerReputation {
 
         // Base score from success rate
         let success_rate = self.successful_transfers as f64 / total as f64;
-        
+
         // Penalty for reports
         let report_penalty = (self.reports as f64 * 0.1).min(0.5);
-        
+
         // Bonus for high volume of successful transfers
         let volume_bonus = (self.successful_transfers as f64 / 100.0).min(0.2);
-        
+
         self.trust_score = (success_rate - report_penalty + volume_bonus).clamp(0.0, 1.0);
     }
 
@@ -372,7 +370,10 @@ impl RateLimiter {
             .unwrap()
             .as_secs();
 
-        let requests = self.requests.entry(peer_id.to_string()).or_insert_with(Vec::new);
+        let requests = self
+            .requests
+            .entry(peer_id.to_string())
+            .or_insert_with(Vec::new);
 
         // Remove old requests outside the window
         requests.retain(|&timestamp| now - timestamp < self.window_seconds);

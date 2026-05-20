@@ -26,11 +26,14 @@ impl<'a> VfxProgressSink for TauriVfxProgressSink<'a> {
             "Progress: step={}, stage='{}', {}/{}, message='{}'",
             progress.step, progress.stage, progress.current, progress.total, progress.message
         ));
-        
+
         let _ = self.window.emit("vfx_progress", &progress);
-        
+
         // Also emit as a log message for LogDrawer integration
-        let log_msg = format!("[Step {}] {}: {}", progress.step, progress.stage, progress.message);
+        let log_msg = format!(
+            "[Step {}] {}: {}",
+            progress.step, progress.stage, progress.message
+        );
         let _ = self.window.emit("vfx_log", &log_msg);
     }
 }

@@ -3,13 +3,11 @@
 //!
 //! Defines the request/response protocol for file transfers over libp2p streams.
 
-use libp2p::request_response::{
-    Codec, ProtocolSupport, ResponseChannel,
-};
-use libp2p::PeerId;
-use libp2p::request_response as req_resp;
 use async_trait::async_trait;
 use futures::prelude::*;
+use libp2p::request_response as req_resp;
+use libp2p::request_response::{Codec, ProtocolSupport, ResponseChannel};
+use libp2p::PeerId;
 use serde::{Deserialize, Serialize};
 use std::io;
 
@@ -39,7 +37,11 @@ pub enum FileTransferRequest {
     /// Request a specific file
     GetFile { filename: String },
     /// Request a specific chunk of a file
-    GetChunk { filename: String, offset: u64, size: usize },
+    GetChunk {
+        filename: String,
+        offset: u64,
+        size: usize,
+    },
     /// Ping to keep connection alive
     Ping,
 }
@@ -103,8 +105,7 @@ impl Codec for FileTransferCodec {
         io.read_exact(&mut data).await?;
 
         // Deserialize
-        bincode::deserialize(&data)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        bincode::deserialize(&data).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
     async fn read_response<T>(
@@ -125,8 +126,7 @@ impl Codec for FileTransferCodec {
         io.read_exact(&mut data).await?;
 
         // Deserialize
-        bincode::deserialize(&data)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        bincode::deserialize(&data).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
     async fn write_request<T>(
@@ -139,8 +139,8 @@ impl Codec for FileTransferCodec {
         T: AsyncWrite + Unpin + Send,
     {
         // Serialize
-        let data = bincode::serialize(&req)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let data =
+            bincode::serialize(&req).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         // Write length prefix
         let len = data.len() as u32;
@@ -163,8 +163,8 @@ impl Codec for FileTransferCodec {
         T: AsyncWrite + Unpin + Send,
     {
         // Serialize
-        let data = bincode::serialize(&res)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let data =
+            bincode::serialize(&res).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         // Write length prefix
         let len = data.len() as u32;
@@ -186,11 +186,8 @@ impl Codec for FileTransferCodec {
 pub fn create_file_transfer_protocol() -> req_resp::Behaviour<FileTransferCodec> {
     let protocols = vec![(FileTransferProtocol, ProtocolSupport::Full)];
     let config = req_resp::Config::default();
-    
-    req_resp::Behaviour::new(
-        protocols.into_iter(),
-        config,
-    )
+
+    req_resp::Behaviour::new(protocols.into_iter(), config)
 }
 
 // ============================================================================
@@ -212,23 +209,20 @@ pub enum FileTransferEvent {
         response: FileTransferResponse,
     },
     /// Request failed
-    RequestFailed {
-        peer: PeerId,
-        error: String,
-    },
+    RequestFailed { peer: PeerId, error: String },
 }
 
 impl From<req_resp::Event<FileTransferRequest, FileTransferResponse>> for FileTransferEvent {
     fn from(event: req_resp::Event<FileTransferRequest, FileTransferResponse>) -> Self {
         match event {
             req_resp::Event::Message { peer, message } => match message {
-                req_resp::Message::Request { request, channel, .. } => {
-                    FileTransferEvent::RequestReceived {
-                        peer,
-                        request,
-                        channel,
-                    }
-                }
+                req_resp::Message::Request {
+                    request, channel, ..
+                } => FileTransferEvent::RequestReceived {
+                    peer,
+                    request,
+                    channel,
+                },
                 req_resp::Message::Response { response, .. } => {
                     FileTransferEvent::ResponseReceived { peer, response }
                 }

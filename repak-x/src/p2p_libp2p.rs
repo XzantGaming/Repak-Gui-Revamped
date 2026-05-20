@@ -1,8 +1,8 @@
-﻿#![allow(dead_code)]
+#![allow(dead_code)]
 //! P2P LibP2P Module - Stub Implementation
 
-use serde::{Deserialize, Serialize};
 use base64::Engine;
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

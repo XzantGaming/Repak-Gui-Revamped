@@ -24,15 +24,13 @@ pub fn extract_zip(zip_path: &str, output_dir: &str) -> io::Result<()> {
 
 use std::fs::File;
 use std::io;
-use unrar::Archive;
 use std::path::Path;
+use unrar::Archive;
 use zip::ZipArchive;
 
 pub fn extract_rar(rar_path: &str, output_dir: &str) -> Result<(), unrar::error::UnrarError> {
     let output_dir = Path::new(output_dir);
-    let mut archive =
-        Archive::new(rar_path)
-            .open_for_processing()?;
+    let mut archive = Archive::new(rar_path).open_for_processing()?;
     while let Some(header) = archive.read_header()? {
         let filename = header.entry().filename.clone();
         archive = if header.entry().is_file() {
@@ -47,10 +45,14 @@ pub fn extract_rar(rar_path: &str, output_dir: &str) -> Result<(), unrar::error:
 pub fn extract_7z(archive_path: &str, output_dir: &str) -> io::Result<()> {
     let output_path = Path::new(output_dir);
     std::fs::create_dir_all(output_path)?;
-    
+
     // Use sevenz_rust2's decompress_file utility for simple extraction
-    sevenz_rust2::decompress_file(archive_path, output_path)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to extract 7z archive: {}", e)))?;
-    
+    sevenz_rust2::decompress_file(archive_path, output_path).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("Failed to extract 7z archive: {}", e),
+        )
+    })?;
+
     Ok(())
 }

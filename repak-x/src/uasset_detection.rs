@@ -1,5 +1,5 @@
 //! UAsset detection using UAssetAPI (via UAssetTool)
-//! 
+//!
 //! All detection is done via UAssetAPI - no heuristic fallbacks.
 //! If UAssetAPI fails (e.g., missing USMAP), detection returns false.
 //!
@@ -12,27 +12,34 @@ use uasset_toolkit::get_global_toolkit;
 /// Detects SKELETAL mesh files using UAssetAPI batch detection
 /// Async version for use in Tauri commands
 pub async fn detect_mesh_files_async(mod_contents: &[String]) -> bool {
-    let uasset_files: Vec<String> = mod_contents.iter()
+    let uasset_files: Vec<String> = mod_contents
+        .iter()
         .filter(|f| f.to_lowercase().ends_with(".uasset"))
         .cloned()
         .collect();
-    info!("[Detection] Scanning {} uasset files for SkeletalMesh", uasset_files.len());
-    
+    info!(
+        "[Detection] Scanning {} uasset files for SkeletalMesh",
+        uasset_files.len()
+    );
+
     if uasset_files.is_empty() {
         return false;
     }
-    
+
     // Use global UAssetToolkit singleton for batch detection
     match get_global_toolkit() {
         Ok(toolkit) => {
             info!("[Detection] Using global UAssetToolkit singleton");
-            info!("[Detection] Passing {} files to UAssetAPI batch_detect_skeletal_mesh", uasset_files.len());
-            
+            info!(
+                "[Detection] Passing {} files to UAssetAPI batch_detect_skeletal_mesh",
+                uasset_files.len()
+            );
+
             // Log first few files being checked
             for (i, file) in uasset_files.iter().take(3).enumerate() {
                 info!("[Detection] UAssetAPI checking file {}: {}", i + 1, file);
             }
-            
+
             info!("[Detection] Calling batch_detect_skeletal_mesh...");
             match toolkit.batch_detect_skeletal_mesh(&uasset_files) {
                 Ok(true) => {
@@ -63,10 +70,14 @@ pub async fn detect_mesh_files_async(mod_contents: &[String]) -> bool {
 /// Uses UAssetAPI to find Texture2D assets, then checks if they have a matching .ubulk file
 /// Async version for use in Tauri commands
 pub async fn detect_texture_files_async(mod_contents: &[String]) -> bool {
-    info!("[Detection] Texture detection received {} files to check", mod_contents.len());
-    
+    info!(
+        "[Detection] Texture detection received {} files to check",
+        mod_contents.len()
+    );
+
     // Collect all .ubulk file stems (without extension) for quick lookup
-    let ubulk_stems: std::collections::HashSet<String> = mod_contents.iter()
+    let ubulk_stems: std::collections::HashSet<String> = mod_contents
+        .iter()
         .filter(|f| f.to_lowercase().ends_with(".ubulk"))
         .filter_map(|f| {
             std::path::Path::new(f)
@@ -75,28 +86,36 @@ pub async fn detect_texture_files_async(mod_contents: &[String]) -> bool {
                 .map(|s| s.to_lowercase())
         })
         .collect();
-    
-    info!("[Detection] Found {} .ubulk files in input", ubulk_stems.len());
-    
+
+    info!(
+        "[Detection] Found {} .ubulk files in input",
+        ubulk_stems.len()
+    );
+
     if ubulk_stems.is_empty() {
         info!("[Detection] No .ubulk files found - texture fix NOT needed");
         return false;
     }
-    
+
     // Get all .uasset files
-    let uasset_files: Vec<String> = mod_contents.iter()
+    let uasset_files: Vec<String> = mod_contents
+        .iter()
         .filter(|f| f.to_lowercase().ends_with(".uasset"))
         .cloned()
         .collect();
-    
-    info!("[Detection] Scanning {} uasset files for Texture2D with matching .ubulk", uasset_files.len());
-    
+
+    info!(
+        "[Detection] Scanning {} uasset files for Texture2D with matching .ubulk",
+        uasset_files.len()
+    );
+
     if uasset_files.is_empty() {
         return false;
     }
-    
+
     // Filter to only uassets that have matching .ubulk files
-    let uasset_files_with_ubulk: Vec<String> = uasset_files.iter()
+    let uasset_files_with_ubulk: Vec<String> = uasset_files
+        .iter()
         .filter(|f| {
             std::path::Path::new(f)
                 .file_stem()
@@ -106,19 +125,22 @@ pub async fn detect_texture_files_async(mod_contents: &[String]) -> bool {
         })
         .cloned()
         .collect();
-    
+
     if uasset_files_with_ubulk.is_empty() {
         info!("[Detection] No .uasset files have matching .ubulk files");
         return false;
     }
-    
-    info!("[Detection] Found {} uassets with matching .ubulk, batch checking for Texture2D", uasset_files_with_ubulk.len());
-    
+
+    info!(
+        "[Detection] Found {} uassets with matching .ubulk, batch checking for Texture2D",
+        uasset_files_with_ubulk.len()
+    );
+
     // Use global UAssetToolkit singleton with TRUE batch detection (all files in ONE request)
     match get_global_toolkit() {
         Ok(toolkit) => {
             info!("[Detection] Using global UAssetToolkit singleton");
-            
+
             // Batch check all candidates at once - if any is a texture, we need the fix
             match toolkit.batch_detect_texture(&uasset_files_with_ubulk) {
                 Ok(true) => {
@@ -146,16 +168,20 @@ pub async fn detect_texture_files_async(mod_contents: &[String]) -> bool {
 /// Detects Static Mesh files using UAssetAPI batch detection
 /// Async version for use in Tauri commands
 pub async fn detect_static_mesh_files_async(mod_contents: &[String]) -> bool {
-    let uasset_files: Vec<String> = mod_contents.iter()
+    let uasset_files: Vec<String> = mod_contents
+        .iter()
         .filter(|f| f.to_lowercase().ends_with(".uasset"))
         .cloned()
         .collect();
-    info!("[Detection] Scanning {} uasset files for StaticMesh", uasset_files.len());
-    
+    info!(
+        "[Detection] Scanning {} uasset files for StaticMesh",
+        uasset_files.len()
+    );
+
     if uasset_files.is_empty() {
         return false;
     }
-    
+
     // Use global UAssetToolkit singleton for batch detection
     match get_global_toolkit() {
         Ok(toolkit) => {
@@ -189,16 +215,20 @@ pub async fn detect_static_mesh_files_async(mod_contents: &[String]) -> bool {
 /// Async version for use in Tauri commands
 #[allow(dead_code)]
 pub async fn detect_blueprint_files_async(mod_contents: &[String]) -> bool {
-    let uasset_files: Vec<String> = mod_contents.iter()
+    let uasset_files: Vec<String> = mod_contents
+        .iter()
         .filter(|f| f.to_lowercase().ends_with(".uasset"))
         .cloned()
         .collect();
-    info!("[Detection] Scanning {} uasset files for Blueprint", uasset_files.len());
-    
+    info!(
+        "[Detection] Scanning {} uasset files for Blueprint",
+        uasset_files.len()
+    );
+
     if uasset_files.is_empty() {
         return false;
     }
-    
+
     // Use global UAssetToolkit singleton for batch detection
     if let Ok(toolkit) = get_global_toolkit() {
         info!("[Detection] Using global UAssetToolkit singleton for Blueprint");
@@ -225,23 +255,22 @@ pub async fn detect_blueprint_files_async(mod_contents: &[String]) -> bool {
 /// Detects SKELETAL mesh files using UAssetAPI
 /// Sync version for use in install_mod.rs
 pub fn detect_mesh_files(mod_contents: &[String]) -> bool {
-    let uasset_files: Vec<String> = mod_contents.iter()
+    let uasset_files: Vec<String> = mod_contents
+        .iter()
         .filter(|f| f.to_lowercase().ends_with(".uasset"))
         .cloned()
         .collect();
-    
+
     if uasset_files.is_empty() {
         return false;
     }
-    
+
     // Use global singleton with TRUE batch detection (all files in ONE request)
     match uasset_toolkit::get_global_toolkit() {
-        Ok(toolkit) => {
-            match toolkit.batch_detect_skeletal_mesh(&uasset_files) {
-                Ok(result) => result,
-                Err(_) => false,
-            }
-        }
+        Ok(toolkit) => match toolkit.batch_detect_skeletal_mesh(&uasset_files) {
+            Ok(result) => result,
+            Err(_) => false,
+        },
         Err(_) => false,
     }
 }
@@ -251,7 +280,8 @@ pub fn detect_mesh_files(mod_contents: &[String]) -> bool {
 /// Sync version for use in install_mod.rs
 pub fn detect_texture_files(mod_contents: &[String]) -> bool {
     // Collect all .ubulk file stems (without extension) for quick lookup
-    let ubulk_stems: std::collections::HashSet<String> = mod_contents.iter()
+    let ubulk_stems: std::collections::HashSet<String> = mod_contents
+        .iter()
         .filter(|f| f.to_lowercase().ends_with(".ubulk"))
         .filter_map(|f| {
             std::path::Path::new(f)
@@ -260,13 +290,14 @@ pub fn detect_texture_files(mod_contents: &[String]) -> bool {
                 .map(|s| s.to_lowercase())
         })
         .collect();
-    
+
     if ubulk_stems.is_empty() {
         return false;
     }
-    
+
     // Filter to only uassets that have matching .ubulk files
-    let uasset_files_with_ubulk: Vec<String> = mod_contents.iter()
+    let uasset_files_with_ubulk: Vec<String> = mod_contents
+        .iter()
         .filter(|f| f.to_lowercase().ends_with(".uasset"))
         .filter(|f| {
             std::path::Path::new(f)
@@ -277,19 +308,17 @@ pub fn detect_texture_files(mod_contents: &[String]) -> bool {
         })
         .cloned()
         .collect();
-    
+
     if uasset_files_with_ubulk.is_empty() {
         return false;
     }
-    
+
     // Use global singleton with TRUE batch detection (all candidates in ONE request)
     match uasset_toolkit::get_global_toolkit() {
-        Ok(toolkit) => {
-            match toolkit.batch_detect_texture(&uasset_files_with_ubulk) {
-                Ok(result) => result,
-                Err(_) => false,
-            }
-        }
+        Ok(toolkit) => match toolkit.batch_detect_texture(&uasset_files_with_ubulk) {
+            Ok(result) => result,
+            Err(_) => false,
+        },
         Err(_) => false,
     }
 }
@@ -297,24 +326,22 @@ pub fn detect_texture_files(mod_contents: &[String]) -> bool {
 /// Detects Static Mesh files using UAssetAPI
 /// Sync version for use in install_mod.rs
 pub fn detect_static_mesh_files(mod_contents: &[String]) -> bool {
-    let uasset_files: Vec<String> = mod_contents.iter()
+    let uasset_files: Vec<String> = mod_contents
+        .iter()
         .filter(|f| f.to_lowercase().ends_with(".uasset"))
         .cloned()
         .collect();
-    
+
     if uasset_files.is_empty() {
         return false;
     }
-    
+
     // Use global singleton with TRUE batch detection (all files in ONE request)
     match uasset_toolkit::get_global_toolkit() {
-        Ok(toolkit) => {
-            match toolkit.batch_detect_static_mesh(&uasset_files) {
-                Ok(result) => result,
-                Err(_) => false,
-            }
-        }
+        Ok(toolkit) => match toolkit.batch_detect_static_mesh(&uasset_files) {
+            Ok(result) => result,
+            Err(_) => false,
+        },
         Err(_) => false,
     }
 }
-

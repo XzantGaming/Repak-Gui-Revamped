@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 /// Obfuscate an IP address for display purposes
-/// 
+///
 /// - IPv4: Shows first octet and hashed representation (e.g., "192.xxx.xxx.xxx [a1b2c3]")
 /// - IPv6: Shows first segment and hashed representation (e.g., "2001:xxxx:... [a1b2c3]")
 pub fn obfuscate_ip(ip: &str) -> String {
@@ -55,7 +55,7 @@ fn hash_string(s: &str) -> String {
 }
 
 /// Obfuscate a multiaddress string
-/// 
+///
 /// Example: "/ip4/192.168.1.5/tcp/8080" -> "/ip4/192.xxx.xxx.xxx/tcp/8080 [a1b2c3]"
 pub fn obfuscate_multiaddr(addr: &str) -> String {
     // Parse multiaddr components
@@ -63,7 +63,7 @@ pub fn obfuscate_multiaddr(addr: &str) -> String {
     let mut obfuscated_parts = Vec::new();
     let mut found_ip = false;
     let mut ip_value;
-    
+
     for (i, part) in parts.iter().enumerate() {
         if *part == "ip4" || *part == "ip6" {
             obfuscated_parts.push(part.to_string());
@@ -80,7 +80,7 @@ pub fn obfuscate_multiaddr(addr: &str) -> String {
             obfuscated_parts.push(part.to_string());
         }
     }
-    
+
     obfuscated_parts.join("/")
 }
 
@@ -93,12 +93,8 @@ pub fn obfuscate_multiaddrs(addrs: &[String]) -> Vec<String> {
 pub fn is_private_ip(ip: &str) -> bool {
     if let Ok(addr) = ip.parse::<IpAddr>() {
         match addr {
-            IpAddr::V4(ipv4) => {
-                ipv4.is_private() || ipv4.is_loopback() || ipv4.is_link_local()
-            }
-            IpAddr::V6(ipv6) => {
-                ipv6.is_loopback() || ipv6.is_unicast_link_local()
-            }
+            IpAddr::V4(ipv4) => ipv4.is_private() || ipv4.is_loopback() || ipv4.is_link_local(),
+            IpAddr::V6(ipv6) => ipv6.is_loopback() || ipv6.is_unicast_link_local(),
         }
     } else {
         false

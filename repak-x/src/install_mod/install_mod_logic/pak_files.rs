@@ -1,5 +1,7 @@
 use crate::install_mod::{InstallableMod, AES_KEY_HEX};
 use crate::utils::collect_files;
+use chrono;
+use dirs;
 use log::{debug, info};
 use path_slash::PathExt;
 use rayon::iter::IntoParallelRefIterator;
@@ -8,13 +10,15 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicI32;
 use tempfile::tempdir;
-use dirs;
-use chrono;
 
 use super::iotoc::convert_to_iostore_directory;
 
 pub fn extract_pak_to_dir(pak: &InstallableMod, install_dir: PathBuf) -> Result<(), String> {
-    info!("[ExtractPak] mod_name={}, mod_path={}", pak.mod_name, pak.mod_path.display());
+    info!(
+        "[ExtractPak] mod_name={}, mod_path={}",
+        pak.mod_name,
+        pak.mod_path.display()
+    );
     info!("[ExtractPak] install_dir={}", install_dir.display());
 
     // Write debug info
@@ -31,19 +35,21 @@ pub fn extract_pak_to_dir(pak: &InstallableMod, install_dir: PathBuf) -> Result<
         let _ = std::fs::write(&debug_log, &log_content);
     }
 
-    fs::create_dir_all(&install_dir)
-        .map_err(|e| format!("Failed to create output dir: {}", e))?;
+    fs::create_dir_all(&install_dir).map_err(|e| format!("Failed to create output dir: {}", e))?;
 
     uasset_toolkit::extract_pak_all(
         pak.mod_path.to_str().unwrap_or_default(),
         install_dir.to_str().unwrap_or_default(),
         Some(AES_KEY_HEX),
-    ).map_err(|e| format!("Failed to extract PAK: {}", e))?;
+    )
+    .map_err(|e| format!("Failed to extract PAK: {}", e))?;
 
-    info!("[ExtractPak] Extraction complete to {}", install_dir.display());
+    info!(
+        "[ExtractPak] Extraction complete to {}",
+        install_dir.display()
+    );
     Ok(())
 }
-
 
 pub fn create_repak_from_pak(
     pak: &InstallableMod,
@@ -54,12 +60,8 @@ pub fn create_repak_from_pak(
     let temp_path = temp_dir.path().to_path_buf();
 
     extract_pak_to_dir(pak, temp_path.clone())?;
-    convert_to_iostore_directory(
-        pak,
-        mod_dir.clone(),
-        temp_path,
-        packed_files_count,
-    ).map_err(|e| format!("IoStore conversion failed: {}", e))?;
+    convert_to_iostore_directory(pak, mod_dir.clone(), temp_path, packed_files_count)
+        .map_err(|e| format!("IoStore conversion failed: {}", e))?;
     Ok(())
 }
 
@@ -72,7 +74,10 @@ pub fn create_repak_from_pak_fast(
 ) -> Result<(), String> {
     let output_base = mod_dir.join(&pak.mod_name);
 
-    info!("[CreateRepakFast] Creating IoStore directly from PAK: {}", pak.mod_path.display());
+    info!(
+        "[CreateRepakFast] Creating IoStore directly from PAK: {}",
+        pak.mod_path.display()
+    );
     info!("[CreateRepakFast] Output base: {}", output_base.display());
 
     let result = uasset_toolkit::create_mod_iostore_from_pak(
@@ -83,10 +88,13 @@ pub fn create_repak_from_pak_fast(
         Some(AES_KEY_HEX),       // Use Marvel Rivals AES key
         pak.parallel_processing, // Toggle: false=50%, true=75% CPU threads
         pak.obfuscate,           // Encrypt if enabled
-    ).map_err(|e| format!("Failed to create IoStore from PAK: {}", e))?;
+    )
+    .map_err(|e| format!("Failed to create IoStore from PAK: {}", e))?;
 
-    info!("[CreateRepakFast] IoStore created: utoc={}, converted={} files",
-        result.utoc_path, result.converted_count);
+    info!(
+        "[CreateRepakFast] IoStore created: utoc={}, converted={} files",
+        result.utoc_path, result.converted_count
+    );
 
     packed_files_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     Ok(())
@@ -117,7 +125,10 @@ pub fn repak_dir(
     });
 
     if paths.len() != original_count {
-        info!("Filtered {} files from PAK (temp/backup)", original_count - paths.len());
+        info!(
+            "Filtered {} files from PAK (temp/backup)",
+            original_count - paths.len()
+        );
     }
 
     paths.sort();
@@ -125,7 +136,9 @@ pub fn repak_dir(
     let file_entries: Vec<(String, String)> = paths
         .par_iter()
         .filter_map(|p| {
-            let rel = p.strip_prefix(&to_pak_dir).ok()
+            let rel = p
+                .strip_prefix(&to_pak_dir)
+                .ok()
                 .and_then(|r| r.to_slash())
                 .map(|r| r.to_string())?;
             let abs = p.to_str().map(|s| s.to_string())?;
@@ -140,7 +153,8 @@ pub fn repak_dir(
         Some(&pak.mount_point),
         seed,
         Some(AES_KEY_HEX),
-    ).map_err(|e| format!("Failed to create PAK: {}", e))?;
+    )
+    .map_err(|e| format!("Failed to create PAK: {}", e))?;
 
     installed_mods_ptr.fetch_add(paths.len() as i32, std::sync::atomic::Ordering::SeqCst);
     info!("Wrote pak file successfully");

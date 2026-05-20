@@ -3,17 +3,17 @@ pub mod iotoc;
 pub mod pak_files;
 
 use crate::install_mod::InstallableMod;
+use dirs;
 use iotoc::convert_to_iostore_directory;
 use log::{error, info, warn};
 use pak_files::create_repak_from_pak;
-use std::path::{Path, PathBuf};
-use std::fs;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use regex_lite::Regex;
+use serde_json;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use dirs;
-use serde_json;
-use regex_lite::Regex;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 /// Clean up any existing variants of a mod file (.bak_repak, .pak_disabled) before installing
 /// This prevents duplicate entries when reinstalling a toggled-off mod
@@ -23,17 +23,21 @@ fn cleanup_existing_mod_variants(output_dir: &Path, base_name: &str) {
         format!("{}.bak_repak", base_name),
         format!("{}.pak_disabled", base_name),
     ];
-    
+
     for variant in &variants {
         let path = output_dir.join(variant);
         if path.exists() {
             info!("Cleaning up existing mod variant: {}", path.display());
             if let Err(e) = fs::remove_file(&path) {
-                warn!("Failed to remove existing variant {}: {}", path.display(), e);
+                warn!(
+                    "Failed to remove existing variant {}: {}",
+                    path.display(),
+                    e
+                );
             }
         }
     }
-    
+
     // Also clean up IoStore variants if they exist
     let iostore_extensions = ["utoc", "ucas"];
     for ext in &iostore_extensions {
@@ -47,7 +51,11 @@ fn cleanup_existing_mod_variants(output_dir: &Path, base_name: &str) {
             if path.exists() {
                 info!("Cleaning up existing IoStore variant: {}", path.display());
                 if let Err(e) = fs::remove_file(&path) {
-                    warn!("Failed to remove existing variant {}: {}", path.display(), e);
+                    warn!(
+                        "Failed to remove existing variant {}: {}",
+                        path.display(),
+                        e
+                    );
                 }
             }
         }
@@ -59,27 +67,27 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     if !dst.exists() {
         fs::create_dir_all(dst)?;
     }
-    
+
     for entry in fs::read_dir(src)? {
         let entry = entry?;
         let file_type = entry.file_type()?;
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
-        
+
         if file_type.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
         } else {
             fs::copy(&src_path, &dst_path)?;
         }
     }
-    
+
     Ok(())
 }
 
 pub fn normalize_mod_base_name(name: &str, min_nines: usize) -> String {
     // Regex to find existing 9s suffix
     // Looking for pattern: any characters, then underscore, then 7 or more 9s, then _P
-    
+
     // First, strip _P if present to work with the base
     let base = if name.ends_with("_P") {
         name.strip_suffix("_P").unwrap()
@@ -89,26 +97,26 @@ pub fn normalize_mod_base_name(name: &str, min_nines: usize) -> String {
 
     // Now check if base ends with _999...
     let re = Regex::new(r"^(.*)_(\d+)$").unwrap();
-    
+
     if let Some(caps) = re.captures(base) {
         let prefix = &caps[1];
         let numbers = &caps[2];
-        
+
         // Check if numbers are all 9s
         if numbers.chars().all(|c| c == '9') {
-             let num_nines = numbers.len();
-             if num_nines >= min_nines {
-                 // Already has enough 9s.
-                 // Re-append _P
-                 return format!("{}_{}_P", prefix, numbers);
-             } else {
-                 // Has 9s but not enough. Replace with min_nines 9s.
-                 let new_nines = "9".repeat(min_nines);
-                 return format!("{}_{}_P", prefix, new_nines);
-             }
+            let num_nines = numbers.len();
+            if num_nines >= min_nines {
+                // Already has enough 9s.
+                // Re-append _P
+                return format!("{}_{}_P", prefix, numbers);
+            } else {
+                // Has 9s but not enough. Replace with min_nines 9s.
+                let new_nines = "9".repeat(min_nines);
+                return format!("{}_{}_P", prefix, new_nines);
+            }
         }
     }
-    
+
     // If we are here, it doesn't have a valid 9s suffix.
     // Append suffix.
     let new_nines = "9".repeat(min_nines);
@@ -116,7 +124,9 @@ pub fn normalize_mod_base_name(name: &str, min_nines: usize) -> String {
 }
 
 pub fn record_installed_tags(base_name: &str, tags: &Vec<String>) {
-    if tags.is_empty() { return; }
+    if tags.is_empty() {
+        return;
+    }
     let mut cfg_dir = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
     cfg_dir.push("Repak-X");
     let _ = fs::create_dir_all(&cfg_dir);
@@ -128,11 +138,15 @@ pub fn record_installed_tags(base_name: &str, tags: &Vec<String>) {
             .ok()
             .and_then(|s| serde_json::from_str::<BTreeMap<String, Vec<String>>>(&s).ok())
             .unwrap_or_default()
-    } else { BTreeMap::new() };
+    } else {
+        BTreeMap::new()
+    };
 
     let entry = map.entry(base_name.to_string()).or_default();
     for t in tags {
-        if !entry.contains(t) { entry.push(t.clone()); }
+        if !entry.contains(t) {
+            entry.push(t.clone());
+        }
     }
     entry.sort();
     entry.dedup();
@@ -158,21 +172,23 @@ pub fn install_mods_in_viewport(
 
     for installable_mod in mods.iter_mut() {
         let min_nines = if installable_mod.enabled {
-             let count = type_tracker.entry(installable_mod.mod_type.clone()).or_insert(0);
-             let n = 7 + *count;
-             *count += 1;
-             n
+            let count = type_tracker
+                .entry(installable_mod.mod_type.clone())
+                .or_insert(0);
+            let n = 7 + *count;
+            *count += 1;
+            n
         } else {
-             7
+            7
         };
 
         // Ensure naming suffix consistency up-front for all flows
         installable_mod.mod_name = normalize_mod_base_name(&installable_mod.mod_name, min_nines);
-        
+
         if !installable_mod.enabled {
             continue;
         }
-        
+
         if stop_thread.load(Ordering::SeqCst) {
             warn!("Stopping thread");
             break;
@@ -186,7 +202,10 @@ pub fn install_mods_in_viewport(
             // Create the subfolder if it doesn't exist
             if !subfolder_path.exists() {
                 if let Err(e) = fs::create_dir_all(&subfolder_path) {
-                    error!("Failed to create subfolder '{}': {}", installable_mod.install_subfolder, e);
+                    error!(
+                        "Failed to create subfolder '{}': {}",
+                        installable_mod.install_subfolder, e
+                    );
                     continue;
                 }
                 info!("Created install subfolder: {}", subfolder_path.display());
@@ -210,7 +229,7 @@ pub fn install_mods_in_viewport(
 
             // Ensure output names follow suffix rule
             let base = normalize_mod_base_name(&installable_mod.mod_name, 7);
-            
+
             // Clean up any existing variants before installing
             cleanup_existing_mod_variants(&output_directory, &base);
             let dests = vec![
@@ -221,7 +240,11 @@ pub fn install_mods_in_viewport(
 
             let mut copy_errors: Vec<String> = Vec::new();
             for (src, dest_name) in dests {
-                crate::install_mod::write_install_debug(&format!("  Copying {} -> {}", src.display(), dest_name));
+                crate::install_mod::write_install_debug(&format!(
+                    "  Copying {} -> {}",
+                    src.display(),
+                    dest_name
+                ));
                 if let Err(e) = std::fs::copy(&src, output_directory.join(&dest_name)) {
                     error!("Unable to copy file {:?}: {:?}", src, e);
                     crate::install_mod::write_install_debug(&format!("  ERROR copying: {}", e));
@@ -231,7 +254,11 @@ pub fn install_mods_in_viewport(
             // Record tags for pickup by main app
             record_installed_tags(&base, &installable_mod.custom_tags);
             if copy_errors.is_empty() {
-                results.push(ModInstallResult { mod_name: installable_mod.mod_name.clone(), success: true, error: None });
+                results.push(ModInstallResult {
+                    mod_name: installable_mod.mod_name.clone(),
+                    success: true,
+                    error: None,
+                });
             } else {
                 results.push(ModInstallResult {
                     mod_name: installable_mod.mod_name.clone(),
@@ -243,7 +270,9 @@ pub fn install_mods_in_viewport(
         }
 
         if installable_mod.repak {
-            crate::install_mod::write_install_debug("  -> Taking REPAK path (direct PAK -> IoStore)");
+            crate::install_mod::write_install_debug(
+                "  -> Taking REPAK path (direct PAK -> IoStore)",
+            );
             // Clean up any existing variants before installing
             let base = normalize_mod_base_name(&installable_mod.mod_name, 7);
             cleanup_existing_mod_variants(&output_directory, &base);
@@ -266,7 +295,11 @@ pub fn install_mods_in_viewport(
                 Ok(_) => {
                     let base = normalize_mod_base_name(&installable_mod.mod_name, 7);
                     record_installed_tags(&base, &installable_mod.custom_tags);
-                    results.push(ModInstallResult { mod_name: installable_mod.mod_name.clone(), success: true, error: None });
+                    results.push(ModInstallResult {
+                        mod_name: installable_mod.mod_name.clone(),
+                        success: true,
+                        error: None,
+                    });
                 }
             }
             continue;
@@ -280,16 +313,20 @@ pub fn install_mods_in_viewport(
                 installable_mod.mod_name
             );
             let base = normalize_mod_base_name(&installable_mod.mod_name, 7);
-            
+
             // Clean up any existing variants before installing
             cleanup_existing_mod_variants(&output_directory, &base);
-            
+
             let dest = output_directory.join(format!("{}.pak", &base));
             match std::fs::copy(&installable_mod.mod_path, &dest) {
                 Ok(_) => {
                     record_installed_tags(&base, &installable_mod.custom_tags);
                     installed_mods_ptr.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    results.push(ModInstallResult { mod_name: installable_mod.mod_name.clone(), success: true, error: None });
+                    results.push(ModInstallResult {
+                        mod_name: installable_mod.mod_name.clone(),
+                        success: true,
+                        error: None,
+                    });
                 }
                 Err(e) => {
                     let msg = format!("Failed to copy PAK to {}: {}", dest.display(), e);
@@ -308,7 +345,7 @@ pub fn install_mods_in_viewport(
             // Clean up any existing variants before installing
             let base = normalize_mod_base_name(&installable_mod.mod_name, 7);
             cleanup_existing_mod_variants(&output_directory, &base);
-            
+
             // Copy source directory to temp dir to avoid modifying original files
             let temp_dir = match tempfile::tempdir() {
                 Ok(dir) => dir,
@@ -324,7 +361,7 @@ pub fn install_mods_in_viewport(
                 }
             };
             let temp_path = temp_dir.path().to_path_buf();
-            
+
             // Copy all files from source to temp
             let source_path = PathBuf::from(&installable_mod.mod_path);
             if let Err(e) = copy_dir_recursive(&source_path, &temp_path) {
@@ -338,7 +375,7 @@ pub fn install_mods_in_viewport(
                 continue;
             }
             info!("Copied mod files to temp directory for processing");
-            
+
             let res = convert_to_iostore_directory(
                 installable_mod,
                 output_directory.clone(),
@@ -357,7 +394,11 @@ pub fn install_mods_in_viewport(
                 }
                 Ok(_) => {
                     info!("Installed mod: {}", installable_mod.mod_name);
-                    results.push(ModInstallResult { mod_name: installable_mod.mod_name.clone(), success: true, error: None });
+                    results.push(ModInstallResult {
+                        mod_name: installable_mod.mod_name.clone(),
+                        success: true,
+                        error: None,
+                    });
                 }
             }
         }

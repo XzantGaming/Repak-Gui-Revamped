@@ -34,6 +34,8 @@ pub struct DiscordPresenceManager {
     enabled: Mutex<bool>,
     start_timestamp: i64,
     current_theme: Mutex<String>,
+    current_state: Mutex<Option<String>>,
+    current_details: Mutex<Option<String>>,
 }
 
 impl DiscordPresenceManager {
@@ -48,14 +50,25 @@ impl DiscordPresenceManager {
             enabled: Mutex::new(false),
             start_timestamp,
             current_theme: Mutex::new("default".to_string()),
+            current_state: Mutex::new(None),
+            current_details: Mutex::new(None),
         }
     }
 
     /// Set the color theme for the Discord logo
-    /// This will be applied on the next activity update
+    /// This will be applied immediately if connected
     pub fn set_theme(&self, theme: &str) {
         *self.current_theme.lock() = theme.to_string();
         info!("Discord theme set to: {}", theme);
+
+        // Safely extract the cloned state and details without holding locks
+        // to avoid deadlock inside set_activity
+        let state_opt = { self.current_state.lock().clone() };
+        let details_opt = { self.current_details.lock().clone() };
+
+        if let Some(state) = state_opt {
+            let _ = self.set_activity(&state, details_opt.as_deref());
+        }
     }
 
     /// Get the current theme
@@ -65,6 +78,7 @@ impl DiscordPresenceManager {
 
     pub fn connect(&self) -> Result<(), String> {
         let mut client_guard = self.client.lock();
+        *self.enabled.lock() = true;
 
         if client_guard.is_some() {
             return Ok(()); // Already connected
@@ -80,7 +94,6 @@ impl DiscordPresenceManager {
 
         info!("Connected to Discord Rich Presence");
         *client_guard = Some(client);
-        *self.enabled.lock() = true;
 
         Ok(())
     }
@@ -95,15 +108,31 @@ impl DiscordPresenceManager {
         }
 
         *self.enabled.lock() = false;
+        *self.current_state.lock() = None;
+        *self.current_details.lock() = None;
         Ok(())
     }
 
     pub fn is_connected(&self) -> bool {
-        self.client.lock().is_some() && *self.enabled.lock()
+        *self.enabled.lock()
     }
 
     pub fn set_activity(&self, state: &str, details: Option<&str>) -> Result<(), String> {
         let mut client_guard = self.client.lock();
+
+        // Self-heal: auto-reconnect if enabled but connection was dropped/failed earlier
+        if client_guard.is_none() && *self.enabled.lock() {
+            info!("Discord RPC client connection was lost; attempting self-healing reconnect...");
+            let mut client = DiscordIpcClient::new(DISCORD_APP_ID);
+            if let Err(e) = client.connect() {
+                return Err(format!(
+                    "Failed to reconnect to Discord during self-healing: {}",
+                    e
+                ));
+            }
+            info!("Self-healing reconnect succeeded");
+            *client_guard = Some(client);
+        }
 
         let client = client_guard.as_mut().ok_or("Discord not connected")?;
 
@@ -124,24 +153,19 @@ impl DiscordPresenceManager {
             activity_builder = activity_builder.details(details_text);
         }
 
-        client
-            .set_activity(activity_builder)
-            .map_err(|e| format!("Failed to set Discord activity: {}", e))?;
-
-        Ok(())
-    }
-
-    /// Set the theme and immediately refresh the activity to show the new logo
-    pub fn set_theme_and_refresh(
-        &self,
-        theme: &str,
-        current_state: &str,
-        current_details: Option<&str>,
-    ) -> Result<(), String> {
-        self.set_theme(theme);
-        if self.is_connected() {
-            self.set_activity(current_state, current_details)?;
+        if let Err(e) = client.set_activity(activity_builder) {
+            // Clear the client connection so we can self-heal on the next update
+            *client_guard = None;
+            return Err(format!(
+                "Failed to set Discord activity (cleared client for self-healing): {}",
+                e
+            ));
         }
+
+        // Save current state and details for theme updates
+        *self.current_state.lock() = Some(state.to_string());
+        *self.current_details.lock() = details.map(|s| s.to_string());
+
         Ok(())
     }
 
