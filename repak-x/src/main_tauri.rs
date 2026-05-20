@@ -1890,7 +1890,7 @@ async fn install_mods(
             window_for_logs.emit("install_log", format!("Mod directory: {}", mod_directory.display())).ok();
             
             use crate::install_mod::install_mod_logic::install_mods_in_viewport;
-            
+
             window_for_logs.emit("install_log", "Entering install_mods_in_viewport...").ok();
             
             // Log each mod's path before processing
@@ -1899,18 +1899,57 @@ async fn install_mods(
                 window_for_logs.emit("install_log", format!("  Mod {} path: {}", idx, m.mod_path.display())).ok();
             }
             
-            install_mods_in_viewport(
+            let install_results = install_mods_in_viewport(
                 &mut installable_mods,
                 &mod_directory,
                 &installed_counter,
                 &stop_flag,
             );
             window_for_logs.emit("install_log", "Exited install_mods_in_viewport").ok();
+
+            // Report per-mod results
+            let mut failed: Vec<(String, String)> = Vec::new();
+            let mut succeeded: Vec<String> = Vec::new();
+            for r in &install_results {
+                if r.success {
+                    succeeded.push(r.mod_name.clone());
+                } else {
+                    failed.push((r.mod_name.clone(), r.error.clone().unwrap_or_else(|| "unknown error".to_string())));
+                }
+            }
+            for (name, err) in &failed {
+                window_for_logs.emit("install_log", format!("[FAIL] {}: {}", name, err)).ok();
+            }
+            window_for_logs.emit("install_log", format!("Summary: {} succeeded, {} failed", succeeded.len(), failed.len())).ok();
+            install_results
         }));
-        
+
         match result {
-            Ok(_) => {
-                window_for_logs.emit("install_log", "Installation completed successfully!").ok();
+            Ok(install_results) => {
+                let total = install_results.len();
+                let failed: Vec<&crate::install_mod::install_mod_logic::ModInstallResult> = install_results.iter().filter(|r| !r.success).collect();
+                let failed_count = failed.len();
+                if total == 0 {
+                    let msg = "No mods were processed.".to_string();
+                    window_for_logs.emit("install_log", &msg).ok();
+                    toast_events::emit_installation_failed(&window_for_logs, &msg);
+                } else if failed_count == total {
+                    // All failed
+                    let first_err = failed.first()
+                        .and_then(|r| r.error.clone())
+                        .unwrap_or_else(|| "Unknown error".to_string());
+                    let msg = format!("Installation failed for all {} mod(s). First error: {}", total, first_err);
+                    window_for_logs.emit("install_log", &msg).ok();
+                    toast_events::emit_installation_failed(&window_for_logs, &msg);
+                } else if failed_count > 0 {
+                    // Partial
+                    let names: Vec<String> = failed.iter().map(|r| r.mod_name.clone()).collect();
+                    let msg = format!("Partial install: {} of {} mod(s) failed: {}", failed_count, total, names.join(", "));
+                    window_for_logs.emit("install_log", &msg).ok();
+                    toast_events::emit_installation_failed(&window_for_logs, &msg);
+                } else {
+                    window_for_logs.emit("install_log", "Installation completed successfully!").ok();
+                }
             }
             Err(e) => {
                 let msg = if let Some(s) = e.downcast_ref::<&str>() {
@@ -2251,13 +2290,22 @@ async fn update_mod(
     
     use crate::install_mod::install_mod_logic::install_mods_in_viewport;
     
-    install_mods_in_viewport(
+    let update_results = install_mods_in_viewport(
         &mut installable_mods,
         &mod_directory,
         &installed_counter,
         &stop_flag,
     );
-    
+
+    // If any mod failed in the update, surface the error instead of pretending it worked
+    if let Some(failed) = update_results.iter().find(|r| !r.success) {
+        let err_msg = failed.error.clone().unwrap_or_else(|| "Unknown error".to_string());
+        let msg = format!("Update failed for '{}': {}", failed.mod_name, err_msg);
+        window_clone.emit("install_log", &msg).ok();
+        toast_events::emit_installation_failed(&window_clone, &msg);
+        return Err(msg);
+    }
+
     // ========================================================================
     // Step 4: Apply preserved metadata to the new mod
     // ========================================================================

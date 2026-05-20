@@ -139,13 +139,22 @@ pub fn record_installed_tags(base_name: &str, tags: &Vec<String>) {
     let _ = fs::write(&path, serde_json::to_string_pretty(&map).unwrap());
 }
 
+/// Result of installing a single mod, used to report per-mod success/failure to the UI.
+#[derive(Debug, Clone)]
+pub struct ModInstallResult {
+    pub mod_name: String,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
 pub fn install_mods_in_viewport(
     mods: &mut [InstallableMod],
     mod_directory: &Path,
     installed_mods_ptr: &AtomicI32,
     stop_thread: &AtomicBool,
-) {
+) -> Vec<ModInstallResult> {
     let mut type_tracker: HashMap<String, usize> = HashMap::new();
+    let mut results: Vec<ModInstallResult> = Vec::with_capacity(mods.len());
 
     for installable_mod in mods.iter_mut() {
         let min_nines = if installable_mod.enabled {
@@ -210,15 +219,26 @@ pub fn install_mods_in_viewport(
                 (ucas_path, format!("{}.ucas", base)),
             ];
 
+            let mut copy_errors: Vec<String> = Vec::new();
             for (src, dest_name) in dests {
                 crate::install_mod::write_install_debug(&format!("  Copying {} -> {}", src.display(), dest_name));
                 if let Err(e) = std::fs::copy(&src, output_directory.join(&dest_name)) {
                     error!("Unable to copy file {:?}: {:?}", src, e);
                     crate::install_mod::write_install_debug(&format!("  ERROR copying: {}", e));
+                    copy_errors.push(format!("copy {}: {}", src.display(), e));
                 }
             }
             // Record tags for pickup by main app
             record_installed_tags(&base, &installable_mod.custom_tags);
+            if copy_errors.is_empty() {
+                results.push(ModInstallResult { mod_name: installable_mod.mod_name.clone(), success: true, error: None });
+            } else {
+                results.push(ModInstallResult {
+                    mod_name: installable_mod.mod_name.clone(),
+                    success: false,
+                    error: Some(copy_errors.join("; ")),
+                });
+            }
             continue;
         }
 
@@ -229,16 +249,27 @@ pub fn install_mods_in_viewport(
             cleanup_existing_mod_variants(&output_directory, &base);
 
             // Use optimized path: UAssetTool extracts PAK internally, no Rust-side temp dir
-            if let Err(e) = pak_files::create_repak_from_pak_fast(
+            match pak_files::create_repak_from_pak_fast(
                 installable_mod,
                 output_directory.clone(),
                 installed_mods_ptr,
             ) {
-                error!("Failed to create repak from pak: {}", e);
-            } else {
-                let base = normalize_mod_base_name(&installable_mod.mod_name, 7);
-                record_installed_tags(&base, &installable_mod.custom_tags);
+                Err(e) => {
+                    error!("Failed to create repak from pak: {}", e);
+                    crate::install_mod::write_install_debug(&format!("  ERROR repak: {}", e));
+                    results.push(ModInstallResult {
+                        mod_name: installable_mod.mod_name.clone(),
+                        success: false,
+                        error: Some(e),
+                    });
+                }
+                Ok(_) => {
+                    let base = normalize_mod_base_name(&installable_mod.mod_name, 7);
+                    record_installed_tags(&base, &installable_mod.custom_tags);
+                    results.push(ModInstallResult { mod_name: installable_mod.mod_name.clone(), success: true, error: None });
+                }
             }
+            continue;
         }
 
         // This shit shouldnt even be possible why do I still have this in the codebase???
@@ -253,10 +284,23 @@ pub fn install_mods_in_viewport(
             // Clean up any existing variants before installing
             cleanup_existing_mod_variants(&output_directory, &base);
             
-            std::fs::copy(&installable_mod.mod_path, output_directory.join(format!("{}.pak", &base)))
-            .unwrap();
-            record_installed_tags(&base, &installable_mod.custom_tags);
-            installed_mods_ptr.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let dest = output_directory.join(format!("{}.pak", &base));
+            match std::fs::copy(&installable_mod.mod_path, &dest) {
+                Ok(_) => {
+                    record_installed_tags(&base, &installable_mod.custom_tags);
+                    installed_mods_ptr.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    results.push(ModInstallResult { mod_name: installable_mod.mod_name.clone(), success: true, error: None });
+                }
+                Err(e) => {
+                    let msg = format!("Failed to copy PAK to {}: {}", dest.display(), e);
+                    error!("{}", msg);
+                    results.push(ModInstallResult {
+                        mod_name: installable_mod.mod_name.clone(),
+                        success: false,
+                        error: Some(msg),
+                    });
+                }
+            }
             continue;
         }
 
@@ -269,7 +313,13 @@ pub fn install_mods_in_viewport(
             let temp_dir = match tempfile::tempdir() {
                 Ok(dir) => dir,
                 Err(e) => {
-                    error!("Failed to create temp directory: {}", e);
+                    let msg = format!("Failed to create temp directory: {}", e);
+                    error!("{}", msg);
+                    results.push(ModInstallResult {
+                        mod_name: installable_mod.mod_name.clone(),
+                        success: false,
+                        error: Some(msg),
+                    });
                     continue;
                 }
             };
@@ -278,7 +328,13 @@ pub fn install_mods_in_viewport(
             // Copy all files from source to temp
             let source_path = PathBuf::from(&installable_mod.mod_path);
             if let Err(e) = copy_dir_recursive(&source_path, &temp_path) {
-                error!("Failed to copy mod files to temp directory: {}", e);
+                let msg = format!("Failed to copy mod files to temp directory: {}", e);
+                error!("{}", msg);
+                results.push(ModInstallResult {
+                    mod_name: installable_mod.mod_name.clone(),
+                    success: false,
+                    error: Some(msg),
+                });
                 continue;
             }
             info!("Copied mod files to temp directory for processing");
@@ -290,13 +346,23 @@ pub fn install_mods_in_viewport(
                 installed_mods_ptr,
             );
             // temp_dir is automatically cleaned up when it goes out of scope
-            if let Err(e) = res {
-                error!("Failed to create repak from pak: {}", e);
-            } else {
-                info!("Installed mod: {}", installable_mod.mod_name);
+            match res {
+                Err(e) => {
+                    error!("Failed to create repak from directory: {}", e);
+                    results.push(ModInstallResult {
+                        mod_name: installable_mod.mod_name.clone(),
+                        success: false,
+                        error: Some(e),
+                    });
+                }
+                Ok(_) => {
+                    info!("Installed mod: {}", installable_mod.mod_name);
+                    results.push(ModInstallResult { mod_name: installable_mod.mod_name.clone(), success: true, error: None });
+                }
             }
         }
     }
     // set i32 to -255 magic value to indicate mod installation is done
     AtomicI32::store(installed_mods_ptr, -255, Ordering::SeqCst);
+    results
 }
