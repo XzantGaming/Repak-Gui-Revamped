@@ -502,6 +502,8 @@ pub enum UAssetRequest {
     // PAK operations
     #[serde(rename = "list_pak_files")]
     ListPakFiles { file_path: String, aes_key: Option<String> },
+    #[serde(rename = "list_pak")]
+    ListPak { file_path: String, aes_key: Option<String>, filter_patterns: Option<Vec<String>> },
     #[serde(rename = "extract_pak_file")]
     ExtractPakFile { file_path: String, internal_path: String, output_path: String, aes_key: Option<String> },
     #[serde(rename = "extract_pak_all")]
@@ -746,6 +748,53 @@ pub fn list_pak_files(file_path: &str, aes_key: Option<&str>) -> Result<Vec<Stri
         .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
         .unwrap_or_default();
     Ok(files)
+}
+
+/// One entry returned by `list_pak`: a file inside a PAK with its size and flags.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PakListEntry {
+    pub path: String,
+    pub size: u64,
+    pub compressed_size: u64,
+    pub encrypted: bool,
+    pub compressed: bool,
+}
+
+/// Full result returned by `list_pak`: header metadata plus per-file entries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PakListResult {
+    pub pak_path: String,
+    pub version: i32,
+    pub mount_point: String,
+    pub encrypted_index: bool,
+    pub total_files: usize,
+    pub filtered_count: usize,
+    pub total_uncompressed_bytes: u64,
+    pub total_compressed_bytes: u64,
+    pub files: Vec<PakListEntry>,
+}
+
+/// List the contents of a PAK without extracting it. Optionally filter entries
+/// by substring patterns (case-insensitive, matches the JSON API).
+pub fn list_pak(
+    file_path: &str,
+    aes_key: Option<&str>,
+    filter_patterns: Option<Vec<String>>,
+) -> Result<PakListResult> {
+    let toolkit = get_global_toolkit()?;
+    let request = UAssetRequest::ListPak {
+        file_path: file_path.to_string(),
+        aes_key: aes_key.map(|s| s.to_string()),
+        filter_patterns,
+    };
+    let response = toolkit.send_request(&request)?;
+    if !response.success {
+        anyhow::bail!("Failed to list PAK: {}", response.message);
+    }
+    let data = response.data.unwrap_or(serde_json::json!({}));
+    let parsed: PakListResult = serde_json::from_value(data)
+        .map_err(|e| anyhow::anyhow!("Failed to parse list_pak response: {}", e))?;
+    Ok(parsed)
 }
 
 /// Extract all files from a PAK to a directory (using global singleton)

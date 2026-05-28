@@ -6379,7 +6379,10 @@ async fn get_mod_details(
     utoc_path.set_extension("utoc");
     let is_iostore = utoc_path.exists();
 
-    // Get file list
+    // Get file list (plus, for PAK, extra metadata via the new list_pak JSON API)
+    // `pak_list_info` carries through richer info — total content size and encrypted-index
+    // status — so we don't have to make a second call later.
+    let mut pak_list_info: Option<uasset_toolkit::PakListResult> = None;
     let files: Vec<String> = if is_iostore {
         // For IoStore, read from utoc (handles both normal and obfuscated containers)
         use crate::utoc_utils::read_utoc;
@@ -6388,11 +6391,15 @@ async fn get_mod_details(
             .map(|entry| entry.file_path.clone())
             .collect()
     } else {
-        uasset_toolkit::list_pak_files(
+        let listing = uasset_toolkit::list_pak(
             path.to_str().unwrap_or_default(),
             Some(crate::install_mod::AES_KEY_HEX),
+            None,
         )
-        .map_err(|e| format!("Failed to read PAK: {}", e))?
+        .map_err(|e| format!("Failed to read PAK: {}", e))?;
+        let paths: Vec<String> = listing.files.iter().map(|e| e.path.clone()).collect();
+        pak_list_info = Some(listing);
+        paths
     };
 
     let file_count = files.len();
@@ -6433,12 +6440,19 @@ async fn get_mod_details(
         info!("Blueprint detected via filename patterns");
     }
 
-    // Get total size
+    // Get total size:
+    //   - IoStore: prefer .ucas size (the actual content blob)
+    //   - PAK: prefer the summed uncompressed content size from list_pak (richer than the
+    //          on-disk PAK file size, which includes compression + headers)
+    //   - Fallback: on-disk file size
     let ucas_path_for_size = path.with_extension("ucas");
-    let total_size = if ucas_path_for_size.exists() {
+    let total_size = if is_iostore && ucas_path_for_size.exists() {
         std::fs::metadata(&ucas_path_for_size)
             .map(|m| m.len())
             .unwrap_or(0)
+    } else if let Some(info) = pak_list_info.as_ref() {
+        // Use the uncompressed content size reported by the PAK index
+        info.total_uncompressed_bytes
     } else {
         std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
     };
@@ -6449,11 +6463,16 @@ async fn get_mod_details(
         .unwrap_or("Unknown")
         .to_string();
 
-    // Check if IoStore is encrypted (obfuscated)
+    // Check encryption:
+    //   - IoStore: ask UAssetTool whether the container is AES-encrypted
+    //   - PAK: list_pak already told us if the index is encrypted (obfuscated mods)
     let is_encrypted = if is_iostore {
         uasset_toolkit::is_iostore_encrypted(&utoc_path.to_string_lossy()).unwrap_or(false)
     } else {
-        false
+        pak_list_info
+            .as_ref()
+            .map(|info| info.encrypted_index)
+            .unwrap_or(false)
     };
 
     let details = ModDetails {
