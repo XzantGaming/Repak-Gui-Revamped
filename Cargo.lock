@@ -5480,7 +5480,7 @@ checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
 name = "repak-x"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -7306,7 +7306,7 @@ checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
 
 [[package]]
 name = "uasset_app"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "anyhow",
  "log",
