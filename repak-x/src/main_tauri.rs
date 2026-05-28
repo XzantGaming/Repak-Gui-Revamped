@@ -4410,7 +4410,7 @@ async fn launch_game(state: State<'_, Arc<Mutex<AppState>>>) -> Result<(), Strin
     }
     info!("Recreated launch_record with value 0 (skip launcher)");
 
-    // Launch the game via Steam with RUNASINVOKER to skip UAC prompt
+    // Launch the game via Steam (running with parent admin rights)
     #[cfg(target_os = "windows")]
     let launch_result = {
         use std::os::windows::process::CommandExt;
@@ -4418,18 +4418,12 @@ async fn launch_game(state: State<'_, Arc<Mutex<AppState>>>) -> Result<(), Strin
 
         Command::new("cmd")
             .arg("/C")
-            .arg("set")
-            .arg("__COMPAT_LAYER=RUNASINVOKER")
-            .arg("&&")
             .arg("start")
             .arg("")
             .arg("steam://run/2767030")
             .creation_flags(CREATE_NO_WINDOW)
             .spawn()
     };
-
-    #[cfg(target_os = "macos")]
-    let launch_result = Command::new("open").arg("steam://run/2767030").spawn();
 
     #[cfg(target_os = "linux")]
     let launch_result = Command::new("xdg-open").arg("steam://run/2767030").spawn();
@@ -5440,9 +5434,11 @@ for /d %%i in ("{temp_dir}\extracted\*") do (
     set /a FOLDER_COUNT+=1
 )
 
-:: If exactly one subfolder exists and it contains an exe, use that folder
+:: If exactly one subfolder exists and it contains an exe or dll, use that folder
 if "%FOLDER_COUNT%"=="1" (
     if exist "%EXTRACTED_DIR%\*.exe" (
+        echo Found nested folder: %EXTRACTED_DIR%
+    ) else if exist "%EXTRACTED_DIR%\*.dll" (
         echo Found nested folder: %EXTRACTED_DIR%
     ) else (
         set "EXTRACTED_DIR={temp_dir}\extracted"
@@ -5465,9 +5461,13 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-:: Remove stale artifacts that should not ship (legacy ue4-dds-tools, debug symbols)
+:: Remove stale artifacts that should not ship (legacy ue4-dds-tools, debug symbols, stale executables)
 if exist "{app_dir}\uassettool\ue4-dds-tools" rd /s /q "{app_dir}\uassettool\ue4-dds-tools" 2>nul
 del /q "{app_dir}\uassettool\*.pdb" 2>nul
+if exist "{app_dir}\uassettool\UAssetTool.exe" del /f /q "{app_dir}\uassettool\UAssetTool.exe" 2>nul
+if exist "{app_dir}\UAssetTool.exe" del /f /q "{app_dir}\UAssetTool.exe" 2>nul
+if exist "{app_dir}\tools\UAssetTool.exe" del /f /q "{app_dir}\tools\UAssetTool.exe" 2>nul
+if exist "{app_dir}\tools\uassettool\UAssetTool.exe" del /f /q "{app_dir}\tools\uassettool\UAssetTool.exe" 2>nul
 
 echo Cleaning up temporary files...
 rd /s /q "{temp_dir}" 2>nul
@@ -5597,6 +5597,7 @@ echo ""
 echo "Copying new files..."
 cp -rf "$EXTRACTED_DIR"/* "$APP_DIR/"
 chmod +x "$APP_DIR/REPAK-X" 2>/dev/null || chmod +x "$APP_DIR/repak-x" 2>/dev/null || true
+rm -f "$APP_DIR/uassettool/UAssetTool" "$APP_DIR/UAssetTool" "$APP_DIR/tools/UAssetTool" "$APP_DIR/tools/uassettool/UAssetTool" 2>/dev/null
 
 echo "Cleaning up..."
 rm -rf "$TEMP_DIR"
@@ -5667,6 +5668,7 @@ echo ""
 echo "Copying new files..."
 cp -rf "$EXTRACTED_DIR"/* "$APP_DIR/"
 chmod +x "$APP_DIR/REPAK-X" 2>/dev/null || chmod +x "$APP_DIR/repak-x" 2>/dev/null || true
+rm -f "$APP_DIR/uassettool/UAssetTool" "$APP_DIR/UAssetTool" "$APP_DIR/tools/UAssetTool" "$APP_DIR/tools/uassettool/UAssetTool" 2>/dev/null
 
 echo "Cleaning up..."
 rm -rf "$TEMP_DIR"
@@ -5740,57 +5742,6 @@ rm -f "$0"
         #[cfg(not(unix))]
         {
             return Err("Linux update not supported on this build".to_string());
-        }
-    } else if cfg!(target_os = "macos") {
-        // macOS: Create .sh script
-        let macos_script_path = std::env::temp_dir().join("repakx_updater.sh");
-        let macos_script = format!(
-            r#"#!/bin/bash
-echo "Waiting for RepakX to close..."
-sleep 2
-
-while pgrep -f "{exe_name}" > /dev/null; do
-    sleep 1
-done
-
-echo "Installing update..."
-unzip -o "{zip_path}" -d "{app_dir}"
-
-echo "Update complete! Launching RepakX..."
-open "{exe_path}"
-
-rm -f "$0"
-"#,
-            exe_name = exe_name,
-            zip_path = download_path.to_string_lossy(),
-            app_dir = app_dir.to_string_lossy(),
-            exe_path = exe_path.to_string_lossy(),
-        );
-
-        std::fs::write(&macos_script_path, &macos_script)
-            .map_err(|e| format!("Failed to write macOS updater script: {}", e))?;
-
-        info!("Created macOS updater script at: {:?}", macos_script_path);
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&macos_script_path)
-                .map_err(|e| format!("Failed to get script metadata: {}", e))?
-                .permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&macos_script_path, perms)
-                .map_err(|e| format!("Failed to set script permissions: {}", e))?;
-
-            std::process::Command::new("bash")
-                .arg(&macos_script_path)
-                .spawn()
-                .map_err(|e| format!("Failed to launch updater: {}", e))?;
-        }
-
-        #[cfg(not(unix))]
-        {
-            return Err("macOS update not supported on this build".to_string());
         }
     } else {
         return Err("Unsupported operating system for auto-update".to_string());
