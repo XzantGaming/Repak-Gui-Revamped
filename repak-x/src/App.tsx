@@ -1036,24 +1036,19 @@ function App() {
       })
 
       if (selected) {
-        const obfuscatePreference = await withPromiseTransitionLoader('Preparing update...', async () => {
-          console.debug('[UpdateMod] File selected, fetching update preparation data', { selectedPath: selected })
-          const pref = await invoke('get_obfuscate') as boolean
-          console.debug('[UpdateMod] Retrieved obfuscate preference', { value: pref })
-          return pref
-        })
-
+        // No persisted global obfuscate preference exists; default to false
+        // (same behavior as the Install panel). The modal lets the user override.
         setUpdateModState({
           isOpen: true,
           mod: mod,
           newSourcePath: selected,
-          obfuscatePreference
+          obfuscatePreference: false
         })
         console.debug('[UpdateMod] Update modal opened', { modPath: mod.path, selectedPath: selected })
       }
     } catch (e) {
       console.error('Failed to select update file:', e)
-      alert.error('Selection Failed', 'Could not open file picker')
+      alert.error('Selection Failed', `Could not open file picker: ${e}`)
     }
   }
 

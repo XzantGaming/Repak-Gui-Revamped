@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { invoke } from '@tauri-apps/api/core'
 import { FaExchangeAlt } from 'react-icons/fa'
 import { IoWarningOutline } from 'react-icons/io5'
 import Switch from './ui/Switch'
@@ -26,20 +25,9 @@ export default function UpdateModModal({ isOpen, onClose, onConfirm, oldMod, new
 
     useEffect(() => {
         if (isOpen) {
-            if (typeof initialObfuscate === 'boolean') {
-                console.debug('[UpdateModModal] Applying initial obfuscate value from transition flow', {
-                    value: initialObfuscate
-                })
-                setObfuscate(initialObfuscate)
-                return
-            }
-
-            console.debug('[UpdateModModal] No initial obfuscate provided, reading from backend')
-            invoke('get_obfuscate')
-                .then((val) => setObfuscate(val as boolean))
-                .catch((error) => {
-                    console.error('[UpdateModModal] Failed to fetch obfuscate preference:', error)
-                })
+            const value = typeof initialObfuscate === 'boolean' ? initialObfuscate : false
+            console.debug('[UpdateModModal] Applying obfuscate value', { value })
+            setObfuscate(value)
         }
     }, [isOpen, initialObfuscate])
 

@@ -1,11 +1,9 @@
 # Repak X — Changelog
 
-## [1.4.1](https://github.com/XzantGaming/Repak-X/releases/latest)
+## [1.4.2](https://github.com/XzantGaming/Repak-X/releases/latest)
 
 ### 🔧 Backend / Logic
-- Refactored app Settings to persist across updates
-- Changed Launch Game command to execute as intended
-- Fixed mod obfuscation flags
+- Fixed VFX Updater pipeline stalling at JSON conversion step
 
 ### 🎨 Frontend / UI
-- Added Black Cat and Devil Dinosaur icons
+- Fixed Update Mod modal not opening when selecting a .pak file

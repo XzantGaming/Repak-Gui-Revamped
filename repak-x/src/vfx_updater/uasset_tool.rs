@@ -503,6 +503,23 @@ pub async fn convert_uassets_to_json(
         }
     }
 
+    // Fallback: if the UAT response did not include a `files` list, enumerate
+    // the produced JSON files from disk so downstream pipeline steps receive
+    // the real conversion output instead of an empty list.
+    if converted_files.is_empty() {
+        let mut json_paths = Vec::new();
+        find_json_paths(Path::new(output_dir), &mut json_paths)?;
+        converted_files = json_paths
+            .into_iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        vfx_debug(&format!(
+            "to_json response had no `files` field; enumerated {} JSON files from {}",
+            converted_files.len(),
+            output_dir
+        ));
+    }
+
     Ok(converted_files)
 }
 
