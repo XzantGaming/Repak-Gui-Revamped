@@ -1840,6 +1840,40 @@ fn copy_iostore_with_compression_check(
     Ok(file_count)
 }
 
+fn get_clean_base_name(filename: &str) -> String {
+    let mut stem = filename;
+    
+    loop {
+        let prev_stem = stem;
+        for ext in &[".pak", ".pak_disabled", ".bak_repak", ".utoc", ".ucas"] {
+            if stem.ends_with(ext) {
+                stem = stem.strip_suffix(ext).unwrap();
+            }
+        }
+        if stem == prev_stem {
+            break;
+        }
+    }
+
+    let stem_no_exclaim = stem.strip_prefix("!").unwrap_or(stem);
+
+    let base_no_p = if stem_no_exclaim.ends_with("_P") {
+        stem_no_exclaim.strip_suffix("_P").unwrap()
+    } else {
+        stem_no_exclaim
+    };
+
+    let re = Regex::new(r"^(.*)_(\d+)$").unwrap();
+    if let Some(caps) = re.captures(base_no_p) {
+        let prefix = &caps[1];
+        let numbers = &caps[2];
+        if numbers.chars().all(|c| c == '9') {
+            return prefix.to_string();
+        }
+    }
+    base_no_p.to_string()
+}
+
 /// Quick Organize: Simply copy/move files to a target folder without any repak processing
 /// This is for organizing existing mod files into subfolders
 /// Now also detects uncompressed IoStore bundles and recompresses them with Oodle
@@ -1874,6 +1908,55 @@ async fn quick_organize(
             output_dir.display()
         );
     }
+
+    let mut cleaned_bases = std::collections::HashSet::new();
+
+    let mut cleanup_conflicting_mods = |dest_dir: &Path, incoming_filename: &str| {
+        let clean_base = get_clean_base_name(incoming_filename);
+        if clean_base.is_empty() {
+            return;
+        }
+
+        // Only run cleanup once per clean base name
+        if !cleaned_bases.insert(clean_base.clone()) {
+            return;
+        }
+
+        if !dest_dir.exists() {
+            return;
+        }
+
+        info!(
+            "[QuickOrganize] Cleaning up existing mod variants for clean base '{}' in '{}'",
+            clean_base,
+            dest_dir.display()
+        );
+
+        if let Ok(entries) = std::fs::read_dir(dest_dir) {
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+                if entry_path.is_file() {
+                    if let Some(name_str) = entry_path.file_name().and_then(|n| n.to_str()) {
+                        let entry_clean_base = get_clean_base_name(name_str);
+                        if entry_clean_base == clean_base {
+                            info!(
+                                "[QuickOrganize] Removing conflicting pre-existing file: {}",
+                                entry_path.display()
+                            );
+                            if let Err(e) = std::fs::remove_file(&entry_path) {
+                                warn!(
+                                    "[QuickOrganize] Failed to remove conflicting file {}: {}",
+                                    entry_path.display(),
+                                    e
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+
 
     info!(
         "[QuickOrganize] Copying {} file(s) to '{}'",
@@ -2043,6 +2126,9 @@ async fn quick_organize(
                             }
                         };
 
+                        let file_name_str = entry_path.file_name().unwrap_or_default().to_str().unwrap_or("");
+                        cleanup_conflicting_mods(dest.parent().unwrap_or(&output_dir), file_name_str);
+
                         if let Err(e) = std::fs::copy(entry_path, &dest) {
                             error!(
                                 "[QuickOrganize] Failed to copy {}: {}",
@@ -2082,6 +2168,9 @@ async fn quick_organize(
                                 }
                             };
 
+                            let file_name_str = entry_path.file_name().unwrap_or_default().to_str().unwrap_or("");
+                            cleanup_conflicting_mods(&dest_dir, file_name_str);
+
                             match copy_iostore_with_compression_check(
                                 entry_path, &dest_dir, &window,
                             ) {
@@ -2104,6 +2193,9 @@ async fn quick_organize(
         else if ext == "pak" {
             let file_name = path.file_name().unwrap();
             let dest = output_dir.join(file_name);
+
+            let file_name_str = file_name.to_str().unwrap_or("");
+            cleanup_conflicting_mods(&output_dir, file_name_str);
 
             // Copy the pak file
             if let Err(e) = std::fs::copy(&path, &dest) {
@@ -2151,6 +2243,9 @@ async fn quick_organize(
         else if ext == "utoc" {
             let ucas_path = path.with_extension("ucas");
             if ucas_path.exists() {
+                let file_name_str = path.file_name().unwrap_or_default().to_str().unwrap_or("");
+                cleanup_conflicting_mods(&output_dir, file_name_str);
+
                 match copy_iostore_with_compression_check(&path, &output_dir, &window) {
                     Ok(count) => copied_count += count as i32,
                     Err(e) => {
@@ -2184,6 +2279,9 @@ async fn quick_organize(
                                 continue;
                             }
                         };
+
+                        let file_name_str = entry_path.file_name().unwrap_or_default().to_str().unwrap_or("");
+                        cleanup_conflicting_mods(dest.parent().unwrap_or(&output_dir), file_name_str);
 
                         if let Err(e) = std::fs::copy(entry_path, &dest) {
                             error!(
@@ -2220,6 +2318,9 @@ async fn quick_organize(
                                         continue;
                                     }
                                 };
+
+                            let file_name_str = entry_path.file_name().unwrap_or_default().to_str().unwrap_or("");
+                            cleanup_conflicting_mods(&dest_dir, file_name_str);
 
                             match copy_iostore_with_compression_check(
                                 entry_path, &dest_dir, &window,

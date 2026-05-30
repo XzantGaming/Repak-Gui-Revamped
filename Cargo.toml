@@ -6,7 +6,7 @@ members = ["repak-x", "uasset_toolkit/uasset_app"]
 repository = "https://github.com/XzantGaming/Repak-X"
 authors = ["Xzant", "Saturn"]
 license = "GPL-3.0"
-version = "1.4.1"
+version = "1.4.2"
 edition = "2021"
 keywords = ["marvel-rivals","unreal-engine", "pak", "unrealpak"]
 
