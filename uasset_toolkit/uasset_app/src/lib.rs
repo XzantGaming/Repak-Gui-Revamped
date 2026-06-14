@@ -4,8 +4,7 @@ use std::io::{BufRead, BufReader as StdBufReader, Write};
 use std::path::Path;
 use std::process::Stdio;
 use std::process::{
-    Child as StdChild, ChildStdin as StdChildStdin, ChildStdout as StdChildStdout,
-    Command as StdCommand,
+    Child as StdChild, ChildStdin as StdChildStdin, Command as StdCommand,
 };
 use std::sync::{mpsc, Mutex as StdMutex, OnceLock};
 use std::thread;
