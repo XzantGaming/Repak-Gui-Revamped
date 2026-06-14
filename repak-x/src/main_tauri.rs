@@ -5565,7 +5565,19 @@ if %ERRORLEVEL% NEQ 0 (
 :: Remove stale artifacts that should not ship (legacy ue4-dds-tools, debug symbols, stale executables)
 if exist "{app_dir}\uassettool\ue4-dds-tools" rd /s /q "{app_dir}\uassettool\ue4-dds-tools" 2>nul
 del /q "{app_dir}\uassettool\*.pdb" 2>nul
-if exist "{app_dir}\uassettool\UAssetTool.exe" del /f /q "{app_dir}\uassettool\UAssetTool.exe" 2>nul
+
+:: AOT migration guard: the AOT layout replaces the self-contained UAssetTool.exe with a
+:: framework-dependent UAssetTool.dll. Remove the old self-contained exe ONLY when the incoming
+:: release ships that exact marker (UAssetTool.dll) AND no longer ships UAssetTool.exe.
+:: Hardcode the marker name -- NEVER match *.dll, because Oodle (oo2core/oodle*) DLLs also live
+:: in this folder and a wildcard would falsely "detect AOT" and delete a still-needed UAssetTool.exe.
+if exist "%EXTRACTED_DIR%\uassettool\UAssetTool.dll" (
+    if not exist "%EXTRACTED_DIR%\uassettool\UAssetTool.exe" (
+        if exist "{app_dir}\uassettool\UAssetTool.exe" del /f /q "{app_dir}\uassettool\UAssetTool.exe" 2>nul
+    )
+)
+
+:: These are always-wrong locations (never the resolved tool path) -- safe to clean unconditionally
 if exist "{app_dir}\UAssetTool.exe" del /f /q "{app_dir}\UAssetTool.exe" 2>nul
 if exist "{app_dir}\tools\UAssetTool.exe" del /f /q "{app_dir}\tools\UAssetTool.exe" 2>nul
 if exist "{app_dir}\tools\uassettool\UAssetTool.exe" del /f /q "{app_dir}\tools\uassettool\UAssetTool.exe" 2>nul
@@ -5698,7 +5710,17 @@ echo ""
 echo "Copying new files..."
 cp -rf "$EXTRACTED_DIR"/* "$APP_DIR/"
 chmod +x "$APP_DIR/REPAK-X" 2>/dev/null || chmod +x "$APP_DIR/repak-x" 2>/dev/null || true
-rm -f "$APP_DIR/uassettool/UAssetTool" "$APP_DIR/UAssetTool" "$APP_DIR/tools/UAssetTool" "$APP_DIR/tools/uassettool/UAssetTool" 2>/dev/null
+
+# AOT migration guard: the AOT layout replaces the self-contained UAssetTool with a
+# framework-dependent UAssetTool.dll. Remove the old self-contained binary ONLY when the incoming
+# release ships that exact marker (UAssetTool.dll) AND no longer ships the UAssetTool binary.
+# Hardcode the marker name -- NEVER match *.dll, because Oodle DLLs also live in this folder and a
+# wildcard would falsely "detect AOT" and delete a still-needed UAssetTool binary.
+if [ -f "$EXTRACTED_DIR/uassettool/UAssetTool.dll" ] && [ ! -f "$EXTRACTED_DIR/uassettool/UAssetTool" ]; then
+    rm -f "$APP_DIR/uassettool/UAssetTool" 2>/dev/null
+fi
+# Always-wrong locations (never the resolved tool path) -- safe to clean unconditionally
+rm -f "$APP_DIR/UAssetTool" "$APP_DIR/tools/UAssetTool" "$APP_DIR/tools/uassettool/UAssetTool" 2>/dev/null
 
 echo "Cleaning up..."
 rm -rf "$TEMP_DIR"
@@ -5769,7 +5791,17 @@ echo ""
 echo "Copying new files..."
 cp -rf "$EXTRACTED_DIR"/* "$APP_DIR/"
 chmod +x "$APP_DIR/REPAK-X" 2>/dev/null || chmod +x "$APP_DIR/repak-x" 2>/dev/null || true
-rm -f "$APP_DIR/uassettool/UAssetTool" "$APP_DIR/UAssetTool" "$APP_DIR/tools/UAssetTool" "$APP_DIR/tools/uassettool/UAssetTool" 2>/dev/null
+
+# AOT migration guard: the AOT layout replaces the self-contained UAssetTool with a
+# framework-dependent UAssetTool.dll. Remove the old self-contained binary ONLY when the incoming
+# release ships that exact marker (UAssetTool.dll) AND no longer ships the UAssetTool binary.
+# Hardcode the marker name -- NEVER match *.dll, because Oodle DLLs also live in this folder and a
+# wildcard would falsely "detect AOT" and delete a still-needed UAssetTool binary.
+if [ -f "$EXTRACTED_DIR/uassettool/UAssetTool.dll" ] && [ ! -f "$EXTRACTED_DIR/uassettool/UAssetTool" ]; then
+    rm -f "$APP_DIR/uassettool/UAssetTool" 2>/dev/null
+fi
+# Always-wrong locations (never the resolved tool path) -- safe to clean unconditionally
+rm -f "$APP_DIR/UAssetTool" "$APP_DIR/tools/UAssetTool" "$APP_DIR/tools/uassettool/UAssetTool" 2>/dev/null
 
 echo "Cleaning up..."
 rm -rf "$TEMP_DIR"

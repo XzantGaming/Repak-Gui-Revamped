@@ -1,10 +1,12 @@
 # Repak X — Changelog
 
-## [1.4.2](https://github.com/XzantGaming/Repak-X/releases/latest)
+## [1.4.3](https://github.com/XzantGaming/Repak-X/releases/latest)
 
 ### 🔧 Backend / Logic
-- Fixed VFX Updater pipeline stalling at JSON conversion step
-- Fixed an issue where installations from browser extension didn't replace older versions of the same mod when matching names
+- Fixed issues with Single Material Meshes
 
 ### 🎨 Frontend / UI
-- Fixed Update Mod modal not opening when selecting a .pak file
+- Fixed the Mod-Install panel not showing character type on install
+
+### Notice!!
+- Due to the Updater being buggy (is fixed now for future releases) please cleanly reinstall from the github repo!

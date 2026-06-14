@@ -690,11 +690,6 @@ pub enum UAssetRequest {
     },
 
     // PAK operations
-    #[serde(rename = "list_pak_files")]
-    ListPakFiles {
-        file_path: String,
-        aes_key: Option<String>,
-    },
     #[serde(rename = "list_pak")]
     ListPak {
         file_path: String,
@@ -1008,28 +1003,15 @@ pub fn list_iostore_files(file_path: &str, aes_key: Option<&str>) -> Result<IoSt
     toolkit.list_iostore_files(file_path, aes_key)
 }
 
-/// List all files inside a PAK file (using global singleton)
+/// List the file paths inside a PAK (paths only).
+///
+/// Thin convenience wrapper over [`list_pak`]: all PAK listing goes through the
+/// single `list_pak` JSON action, and this projects out just the file paths for
+/// the many call sites that don't need the per-entry size/flags. This avoids a
+/// second listing action whose response schema can drift from `list_pak`.
 pub fn list_pak_files(file_path: &str, aes_key: Option<&str>) -> Result<Vec<String>> {
-    let toolkit = get_global_toolkit()?;
-    let request = UAssetRequest::ListPakFiles {
-        file_path: file_path.to_string(),
-        aes_key: aes_key.map(|s| s.to_string()),
-    };
-    let response = toolkit.send_request(&request)?;
-    if !response.success {
-        anyhow::bail!("Failed to list PAK files: {}", response.message);
-    }
-    let data = response.data.unwrap_or(serde_json::json!({}));
-    let files = data
-        .get("files")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default();
-    Ok(files)
+    let listing = list_pak(file_path, aes_key, None)?;
+    Ok(listing.files.into_iter().map(|e| e.path).collect())
 }
 
 /// One entry returned by `list_pak`: a file inside a PAK with its size and flags.
