@@ -136,7 +136,13 @@ function Invoke-VersionBump {
     Write-Host ""
     Write-Host "Updating Cargo.lock..." -ForegroundColor Cyan
     Push-Location $RepoRoot
-    cargo check --quiet 2>$null
+    # cargo writes compiler warnings to stderr; under the caller's $ErrorActionPreference='Stop'
+    # the first warning line surfaces as a terminating NativeCommandError. Neutralize EAP for the
+    # duration and discard all output so a noisy (but harmless) warning can't abort the release.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    cargo check --quiet 2>&1 | Out-Null
+    $ErrorActionPreference = $prevEAP
     Pop-Location
     Write-Host "  [OK] Cargo.lock" -ForegroundColor Green
     
