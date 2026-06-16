@@ -224,6 +224,7 @@ struct ModEntry {
     folder_id: Option<String>,
     custom_tags: Vec<String>,
     file_size: u64,
+    modified_date: u64,
     priority: usize,
     // Character/skin info from character_data (dynamically looked up)
     character_name: Option<String>,
@@ -608,6 +609,12 @@ async fn get_pak_files(state: State<'_, Arc<Mutex<AppState>>>) -> Result<Vec<Mod
                 std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
             };
 
+            let modified_date = std::fs::metadata(path)
+                .and_then(|m| m.modified())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+
             // Calculate priority
             // Priority 0 = "!" prefix (highest priority)
             // Priority 1-N = 7-N+6 nines displayed as 1-based (7 nines → Priority 1, 8 nines → Priority 2, etc.)
@@ -643,6 +650,7 @@ async fn get_pak_files(state: State<'_, Arc<Mutex<AppState>>>) -> Result<Vec<Mod
                 folder_id,
                 custom_tags: Vec::new(),
                 file_size,
+                modified_date,
                 priority,
                 character_name: None,
                 skin_name: None,
@@ -738,6 +746,12 @@ async fn get_pak_files_in_folder(
                 std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
             };
 
+            let modified_date = std::fs::metadata(path)
+                .and_then(|m| m.modified())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+
             // Calculate priority
             let mut priority = 0;
             let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
@@ -766,6 +780,7 @@ async fn get_pak_files_in_folder(
                 folder_id,
                 custom_tags: Vec::new(),
                 file_size,
+                modified_date,
                 priority,
                 character_name: None,
                 skin_name: None,
@@ -6421,6 +6436,7 @@ struct ModDetails {
     is_iostore: bool,
     is_encrypted: bool,
     has_blueprint: bool,
+    is_hybrid: bool,
 }
 
 #[tauri::command]
@@ -6467,13 +6483,45 @@ async fn get_mod_details(
     // `pak_list_info` carries through richer info — total content size and encrypted-index
     // status — so we don't have to make a second call later.
     let mut pak_list_info: Option<uasset_toolkit::PakListResult> = None;
+    let mut is_hybrid = false;
     let files: Vec<String> = if is_iostore {
         // For IoStore, read from utoc (handles both normal and obfuscated containers)
         use crate::utoc_utils::read_utoc;
-        read_utoc(&utoc_path)
+        let mut utoc_files: Vec<String> = read_utoc(&utoc_path)
             .iter()
             .map(|entry| entry.file_path.clone())
-            .collect()
+            .collect();
+            
+        // For Hybrid detection: Check if the .pak file also contains raw assets
+        if path.exists() && path.extension().unwrap_or_default() == "pak" {
+            if let Ok(listing) = uasset_toolkit::list_pak(
+                path.to_str().unwrap_or_default(),
+                Some(crate::install_mod::AES_KEY_HEX),
+                None,
+            ) {
+                let all_pak_files: Vec<String> = listing.files.iter()
+                    .map(|e| e.path.clone())
+                    .collect();
+
+                let has_raw_assets = all_pak_files.iter().any(|f| {
+                    let lower = f.to_lowercase();
+                    !lower.contains("chunknames") && !lower.contains("patched_files")
+                });
+
+                if has_raw_assets {
+                    info!("[Detection] Found legacy PAK alongside IoStore bundle (Hybrid!)");
+                    is_hybrid = true;
+                }
+                
+                if !all_pak_files.is_empty() {
+                    // Always append legacy pak files to the total files list
+                    utoc_files.extend(all_pak_files);
+                    pak_list_info = Some(listing);
+                }
+            }
+        }
+        
+        utoc_files
     } else {
         let listing = uasset_toolkit::list_pak(
             path.to_str().unwrap_or_default(),
@@ -6571,6 +6619,7 @@ async fn get_mod_details(
         is_iostore,
         is_encrypted,
         has_blueprint,
+        is_hybrid,
     };
 
     // --- Cache store ---

@@ -27,7 +27,7 @@ import {
 } from '@mui/icons-material'
 import { RiDeleteBin2Fill } from 'react-icons/ri'
 import { MdDriveFileMoveOutline } from "react-icons/md"
-import { FaTag, FaToolbox } from "react-icons/fa6"
+import { FaTag, FaToolbox, FaSort } from "react-icons/fa6"
 import { IoMdWifi, IoIosSettings, IoMdWarning } from "react-icons/io"
 import { GrInstall } from "react-icons/gr"
 import { GiLightningTrio } from "react-icons/gi"
@@ -111,6 +111,7 @@ type ModRecord = {
   enabled?: boolean
   priority?: number
   mod_type?: string
+  modified_date?: number
   [key: string]: any
 }
 
@@ -233,6 +234,8 @@ function App() {
   const [bypassGameRunningLock, setBypassGameRunningLock] = useState(false);
   const [theme, setTheme] = useState('dark');
   const [accentColor, setAccentColor] = useState('#4a9eff');
+  const [sortBy, setSortBy] = useState<'name' | 'modified'>('name');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   // Update system state
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null); // { latest, url, asset_url, asset_name }
@@ -273,6 +276,8 @@ function App() {
   const [lastPanelWidth, setLastPanelWidth] = useState(70) // to restore after collapse (default 30% right panel)
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(false)
   const [isResizing, setIsResizing] = useState(false)
+  const [filtersHeight, setFiltersHeight] = useState<number | null>(null)
+  const [isFiltersResizing, setIsFiltersResizing] = useState(false)
   const [selectedMods, setSelectedMods] = useState<Set<string>>(new Set())
   const [showBulkActions, setShowBulkActions] = useState(false)
   const [newTagInput, setNewTagInput] = useState('')
@@ -345,6 +350,7 @@ function App() {
   const filteredModsRef = useRef<ModRecord[]>([]) // Keep in sync with filteredMods for selection handler
   const clashScopeModPath = useRef<string | null>(null) // null = global clashes, path = single-mod scope
   const safeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const filtersResizeRef = useRef({ startY: 0, startHeight: 0 })
 
   const showPromiseTransitionLoader = (message: string) => {
     console.debug('[PromiseTransitionLoader] show', { message })
@@ -2284,6 +2290,27 @@ function App() {
     setIsResizing(false)
   }
 
+  const handleFiltersResizeStart = (e: React.MouseEvent<HTMLDivElement>) => {
+    setIsFiltersResizing(true)
+    const filtersElement = e.currentTarget.previousElementSibling as HTMLElement
+    filtersResizeRef.current = {
+      startY: e.clientY,
+      startHeight: filtersHeight !== null ? filtersHeight : (filtersElement?.offsetHeight || 200)
+    }
+    e.preventDefault()
+  }
+
+  const handleFiltersResizeMove = (e: MouseEvent) => {
+    if (!isFiltersResizing) return
+    const deltaY = e.clientY - filtersResizeRef.current.startY
+    const newHeight = Math.max(50, Math.min(window.innerHeight - 200, filtersResizeRef.current.startHeight + deltaY))
+    setFiltersHeight(newHeight)
+  }
+
+  const handleFiltersResizeEnd = () => {
+    setIsFiltersResizing(false)
+  }
+
   const toggleRightPanel = () => {
     if (isRightPanelOpen) {
       // Collapse
@@ -2307,6 +2334,17 @@ function App() {
       }
     }
   }, [isResizing])
+
+  useEffect(() => {
+    if (isFiltersResizing) {
+      document.addEventListener('mousemove', handleFiltersResizeMove)
+      document.addEventListener('mouseup', handleFiltersResizeEnd)
+      return () => {
+        document.removeEventListener('mousemove', handleFiltersResizeMove)
+        document.removeEventListener('mouseup', handleFiltersResizeEnd)
+      }
+    }
+  }, [isFiltersResizing])
 
   // Compute base filtered mods (excluding folder filter)
   const baseFilteredMods = mods.filter(mod => {
@@ -2378,6 +2416,16 @@ function App() {
     } else {
       // Match exact folder only
       return mod.folder_id === selectedFolderId
+    }
+  }).sort((a, b) => {
+    if (sortBy === 'name') {
+      const aName = (a.custom_name || a.path.split(/[/\\]/).pop() || '').toLowerCase()
+      const bName = (b.custom_name || b.path.split(/[/\\]/).pop() || '').toLowerCase()
+      return sortDirection === 'asc' ? aName.localeCompare(bName) : bName.localeCompare(aName)
+    } else {
+      const aTime = a.modified_date || 0
+      const bTime = b.modified_date || 0
+      return sortDirection === 'asc' ? aTime - bTime : bTime - aTime
     }
   })
 
@@ -3221,6 +3269,22 @@ function App() {
 
           <div className="action-controls">
             <CustomDropdown
+              options={[
+                { value: 'name_asc', label: 'Name (A-Z)' },
+                { value: 'name_desc', label: 'Name (Z-A)' },
+                { value: 'modified_desc', label: 'Newest First' },
+                { value: 'modified_asc', label: 'Oldest First' },
+              ]}
+              value={`${sortBy}_${sortDirection}`}
+              onChange={(val) => {
+                const [newSortBy, newSortDir] = val.split('_');
+                setSortBy(newSortBy as 'name' | 'modified');
+                setSortDirection(newSortDir as 'asc' | 'desc');
+              }}
+              placeholder="Sort By"
+              icon={<FaSort style={{ fontSize: '1.2rem', opacity: 1, color: 'var(--accent-primary)' }} />}
+            />
+            <CustomDropdown
               options={[{ value: '', label: 'View All' }, ...allTags]}
               value={filterTag}
               onChange={setFilterTag}
@@ -3265,7 +3329,10 @@ function App() {
             {/* Left Sidebar - Folders */}
             <div className="left-sidebar" data-tour="folder-sidebar">
               {/* Filters Section */}
-              <div className="sidebar-filters">
+              <div 
+                className="sidebar-filters"
+                style={filtersHeight !== null ? { height: `${filtersHeight}px` } : undefined}
+              >
                 <div className="sidebar-filters-inner">
                   <div className="filter-title-row">
                     <div className="filter-label">FILTERS</div>
@@ -3343,6 +3410,11 @@ function App() {
                   )}
                 </div>
               </div>
+              {/* Vertical Resize Handle */}
+              <div 
+                className={`vertical-resizer ${isFiltersResizing ? 'resizing' : ''}`}
+                onMouseDown={handleFiltersResizeStart}
+              />
               <div className="sidebar-header">
                 <h3>Folders</h3>
                 <div className="sidebar-header-actions">
