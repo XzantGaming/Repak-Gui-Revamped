@@ -3331,7 +3331,7 @@ function App() {
               {/* Filters Section */}
               <div 
                 className="sidebar-filters"
-                style={filtersHeight !== null ? { height: `${filtersHeight}px` } : undefined}
+                style={filtersHeight !== null ? { height: `${filtersHeight}px` } : { maxHeight: '35vh' }}
               >
                 <div className="sidebar-filters-inner">
                   <div className="filter-title-row">
