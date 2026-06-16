@@ -33,6 +33,7 @@ type ModDetailsData = {
   has_blueprint?: boolean
   is_iostore?: boolean
   is_encrypted?: boolean
+  is_hybrid?: boolean
   [key: string]: any
 }
 
@@ -151,10 +152,10 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose, characte
           <button
             className="header-action-btn"
             onClick={onUpdateMod}
-            title="Update/Replace Mod File"
+            title="Replace Mod File"
             style={{ marginLeft: 'auto' }}
           >
-            <FaExchangeAlt /> Update
+            <FaExchangeAlt /> Replace
           </button>
         )}
       </div>
@@ -230,10 +231,28 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose, characte
             <div className="detail-section">
               <h3>Information</h3>
               <div className="badges-group" style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
-                {(details.is_iostore || details.is_encrypted) && (
+                {(details.is_iostore || details.is_hybrid || details.is_encrypted) && (
                   <div style={{ display: 'flex', gap: '0' }}>
                     {details.is_iostore && (
-                      <div className="iostore-badge" style={{ borderTopRightRadius: details.is_encrypted ? '0' : '4px', borderBottomRightRadius: details.is_encrypted ? '0' : '4px' }}>IO Store Bundle</div>
+                      <div className="iostore-badge" style={{ borderTopRightRadius: details.is_hybrid || details.is_encrypted ? '0' : '4px', borderBottomRightRadius: details.is_hybrid || details.is_encrypted ? '0' : '4px' }}>IO Store Bundle</div>
+                    )}
+                    {details.is_hybrid && (
+                      <div className="hybrid-badge" style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '0.4rem 0.75rem',
+                        borderTopLeftRadius: details.is_iostore ? '0' : '4px',
+                        borderBottomLeftRadius: details.is_iostore ? '0' : '4px',
+                        borderTopRightRadius: details.is_encrypted ? '0' : '4px',
+                        borderBottomRightRadius: details.is_encrypted ? '0' : '4px',
+                        fontWeight: 600,
+                        fontSize: '0.85rem',
+                        background: 'rgba(139, 92, 246, 0.15)',
+                        color: '#a78bfa',
+                        border: '1px solid rgba(139, 92, 246, 0.35)',
+                        borderLeft: details.is_iostore ? 'none' : '1px solid rgba(139, 92, 246, 0.35)'
+                      }} title="Contains both IO Store assets and Legacy Pak raw assets">Hybrid</div>
                     )}
                     {details.is_encrypted && (
                       <div className="encrypted-badge" style={{
@@ -241,8 +260,8 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose, characte
                         alignItems: 'center',
                         justifyContent: 'center',
                         padding: '0.4rem 0.75rem',
-                        borderTopLeftRadius: details.is_iostore ? '0' : '4px',
-                        borderBottomLeftRadius: details.is_iostore ? '0' : '4px',
+                        borderTopLeftRadius: details.is_iostore || details.is_hybrid ? '0' : '4px',
+                        borderBottomLeftRadius: details.is_iostore || details.is_hybrid ? '0' : '4px',
                         borderTopRightRadius: '4px',
                         borderBottomRightRadius: '4px',
                         fontWeight: 600,
@@ -250,7 +269,7 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose, characte
                         background: 'rgba(59, 130, 246, 0.15)',
                         color: '#60a5fa',
                         border: '1px solid rgba(59, 130, 246, 0.35)',
-                        borderLeft: details.is_iostore ? 'none' : '1px solid rgba(59, 130, 246, 0.35)'
+                        borderLeft: details.is_iostore || details.is_hybrid ? 'none' : '1px solid rgba(59, 130, 246, 0.35)'
                       }} title="This mod package is encrypted">Encrypted</div>
                     )}
                   </div>

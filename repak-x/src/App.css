@@ -171,13 +171,76 @@ body {
 /* Sidebar Filters Section */
 .sidebar-filters {
   padding: 0.5rem 0.6rem;
-  border-bottom: 1px solid var(--panel-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.vertical-resizer {
+  height: 10px;
+  background: transparent;
+  cursor: row-resize;
+  width: 100%;
+  flex-shrink: 0;
+  z-index: 10;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: -3px 0; /* Offset increased height so it doesn't push layout too much */
+}
+
+/* The actual line (with gap in the middle) */
+.vertical-resizer::before {
+  content: "";
+  position: absolute;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, var(--panel-border) calc(50% - 18px), transparent calc(50% - 18px), transparent calc(50% + 18px), var(--panel-border) calc(50% + 18px));
+  transition: all 0.2s ease;
+}
+
+/* The grip handle */
+.vertical-resizer::after {
+  content: "";
+  position: absolute;
+  width: 36px;
+  height: 6px;
+  background-color: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  z-index: 1;
+  transition: all 0.2s ease;
+  background-image: 
+    linear-gradient(90deg, var(--text-muted) 1px, transparent 1px),
+    linear-gradient(90deg, var(--text-muted) 1px, transparent 1px),
+    linear-gradient(90deg, var(--text-muted) 1px, transparent 1px);
+  background-position: center left 10px, center, center right 10px;
+  background-size: 1px 4px;
+  background-repeat: no-repeat;
+}
+
+.vertical-resizer:hover::before,
+.vertical-resizer.resizing::before {
+  background: linear-gradient(90deg, var(--accent-primary) calc(50% - 18px), transparent calc(50% - 18px), transparent calc(50% + 18px), var(--accent-primary) calc(50% + 18px));
+}
+
+.vertical-resizer:hover::after,
+.vertical-resizer.resizing::after {
+  border-color: var(--accent-primary);
+  background-image: 
+    linear-gradient(90deg, var(--accent-primary) 1px, transparent 1px),
+    linear-gradient(90deg, var(--accent-primary) 1px, transparent 1px),
+    linear-gradient(90deg, var(--accent-primary) 1px, transparent 1px);
 }
 
 .sidebar-filters-inner {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+  flex: 1;
+  min-height: 0;
 }
 
 .filter-title-row {
@@ -2010,8 +2073,9 @@ input[type="text"]:focus {
 .filter-chips-scroll {
   display: flex;
   flex-wrap: wrap;
+  align-content: flex-start;
   gap: 0.3rem;
-  max-height: 120px;
+  min-height: 0;
   overflow-y: auto;
   padding: 0.25rem 0;
 }
