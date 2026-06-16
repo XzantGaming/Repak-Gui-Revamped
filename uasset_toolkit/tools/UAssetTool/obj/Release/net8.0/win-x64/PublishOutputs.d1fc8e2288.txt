@@ -1,3 +1,0 @@
-B:\MRivalsMods\Coding\REPAK-REVAMPED\Repak-Gui-Revamped\target\debug\uassettool\UAssetTool.pdb
-B:\MRivalsMods\Coding\REPAK-REVAMPED\Repak-Gui-Revamped\target\debug\uassettool\UAssetAPI.pdb
-B:\MRivalsMods\Coding\REPAK-REVAMPED\Repak-Gui-Revamped\target\debug\uassettool\UAssetTool.exe
