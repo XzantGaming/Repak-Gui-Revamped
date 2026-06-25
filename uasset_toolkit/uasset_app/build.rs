@@ -17,7 +17,7 @@ fn get_runtime_identifier() -> &'static str {
             "windows".to_string() // default fallback
         }
     });
-    
+
     match target_os.as_str() {
         "linux" => "linux-x64",
         "macos" => "osx-x64",
@@ -25,25 +25,28 @@ fn get_runtime_identifier() -> &'static str {
     }
 }
 
-/// Get the executable name for the current target platform
-fn get_executable_name() -> &'static str {
+/// Native library file name produced by the NativeAOT build for the target platform.
+fn get_native_lib_name() -> &'static str {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_else(|_| {
         if cfg!(target_os = "windows") {
             "windows".to_string()
+        } else if cfg!(target_os = "macos") {
+            "macos".to_string()
         } else {
             "linux".to_string()
         }
     });
-    
-    if target_os == "windows" {
-        "UAssetTool.exe"
-    } else {
-        "UAssetTool"
+
+    match target_os.as_str() {
+        "windows" => "UAssetTool.dll",
+        "macos" => "libUAssetTool.dylib",
+        _ => "libUAssetTool.so",
     }
 }
 
 fn main() {
     let out_dir = env::var("OUT_DIR").unwrap();
+    // OUT_DIR = target/<profile>/build/uasset_app-XXingr/out -> target/<profile>
     let target_dir = Path::new(&out_dir)
         .parent()
         .unwrap()
@@ -51,29 +54,34 @@ fn main() {
         .unwrap()
         .parent()
         .unwrap();
-    let tool_output_dir: PathBuf = target_dir.join("uassettool");
+    // Place the native library directly beside the final executable so the Rust
+    // loader (`SyncToolkit::find_dll_path`) finds it as its primary location, and
+    // so the OS resolves the library's own native deps from the same directory.
+    let tool_output_dir: PathBuf = target_dir.to_path_buf();
 
-    // Get the workspace root (two levels up from uasset_app: uasset_app -> uasset_toolkit -> workspace root)
+    // Workspace root: uasset_app -> uasset_toolkit -> workspace root
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir.parent().unwrap().parent().unwrap();
 
-    // Use UAssetTool from UAssetToolRivals submodule
+    // The NativeAOT FFI library project inside the UAssetToolRivals submodule.
     let tool_project_dir = workspace_root
         .join("UAssetToolRivals")
         .join("src")
         .join("UAssetTool");
 
-    // Watch all C# source files for changes
-    let program_cs = tool_project_dir.join("Program.cs");
-    let csproj = tool_project_dir.join("UAssetTool.csproj");
-    if program_cs.exists() {
-        println!("cargo:rerun-if-changed={}", program_cs.display());
+    // Rebuild when the FFI surface or the C# sources change.
+    for watched in [
+        "NativeExports.cs",
+        "Program.cs",
+        "UAssetToolNative.csproj",
+        "UAssetTool.csproj",
+        "Directory.Build.props",
+    ] {
+        let p = tool_project_dir.join(watched);
+        if p.exists() {
+            println!("cargo:rerun-if-changed={}", p.display());
+        }
     }
-    if csproj.exists() {
-        println!("cargo:rerun-if-changed={}", csproj.display());
-    }
-
-    // Watch UAssetAPI source directory for changes (now in submodule)
     let uasset_api_dir = workspace_root
         .join("UAssetToolRivals")
         .join("src")
@@ -82,7 +90,6 @@ fn main() {
         println!("cargo:rerun-if-changed={}", uasset_api_dir.display());
     }
 
-    // Create output directory
     if let Err(e) = fs::create_dir_all(&tool_output_dir) {
         println!(
             "cargo:warning=failed to create {}: {}",
@@ -92,119 +99,195 @@ fn main() {
     }
 
     let runtime_id = get_runtime_identifier();
-    let exe_name = get_executable_name();
-    let dest_exe = tool_output_dir.join(exe_name);
+    let lib_name = get_native_lib_name();
+    let dest_lib = tool_output_dir.join(lib_name);
 
-    println!("cargo:warning=Building for runtime: {}, executable: {}", runtime_id, exe_name);
+    println!(
+        "cargo:warning=Building NativeAOT UAssetTool for runtime: {}, library: {}",
+        runtime_id, lib_name
+    );
 
-    // Force rebuild if output doesn't exist
-    if !dest_exe.exists() {
+    if !dest_lib.exists() {
         println!("cargo:rerun-if-changed=build.rs");
     }
 
-    // Check if we should skip the build (e.g. if build_contributor.ps1 already built it)
+    // Allow skipping the (slow) AOT build, e.g. for fast Rust-only iteration or when
+    // the library was produced out of band. When set, never invoke dotnet.
     if env::var("SKIP_UASSET_TOOL_BUILD").is_ok() {
-        println!("cargo:warning=Skipping UAssetTool build because SKIP_UASSET_TOOL_BUILD is set");
-        if dest_exe.exists() {
-            return;
+        if dest_lib.exists() {
+            println!("cargo:warning=SKIP_UASSET_TOOL_BUILD set; using existing {}", dest_lib.display());
         } else {
-            println!("cargo:warning=SKIP_UASSET_TOOL_BUILD is set but {} does not exist. Falling back to build.", dest_exe.display());
+            println!(
+                "cargo:warning=SKIP_UASSET_TOOL_BUILD set but {} is missing; \
+                 UAssetTool calls will fail at runtime until it is built.",
+                dest_lib.display()
+            );
         }
+        return;
     }
 
-    // 1) Try to publish via dotnet into target/uassettool
-    let mut published = false;
+    // NativeAOT publish output layout:
+    //   bin_native/Release/net8.0/<rid>/native/<lib>   (the AOT library)
+    //   bin_native/Release/net8.0/<rid>/publish/       (library + native deps)
+    let native_dir = tool_project_dir
+        .join("bin_native")
+        .join("Release")
+        .join("net8.0")
+        .join(runtime_id)
+        .join("native");
+    let publish_dir = tool_project_dir
+        .join("bin_native")
+        .join("Release")
+        .join("net8.0")
+        .join(runtime_id)
+        .join("publish");
+
+    // 1) Try to publish the NativeAOT library.
+    let mut produced = false;
     let dotnet_available = Command::new("dotnet").arg("--version").output().is_ok();
     if dotnet_available {
-        let status = Command::new("dotnet")
-            .current_dir(&tool_project_dir)
-            .args([
-                "publish",
-                "-c",
-                "Release",
-                "-r",
-                runtime_id,
-                "--self-contained",
-                "true",
-                "-o",
-                &tool_output_dir.to_string_lossy(),
-            ])
-            .status();
+        let mut cmd = Command::new("dotnet");
+        cmd.current_dir(&tool_project_dir).args([
+            "publish",
+            "UAssetToolNative.csproj",
+            "-c",
+            "Release",
+            "-r",
+            runtime_id,
+        ]);
+        // NativeAOT's final link step locates the MSVC toolset by invoking `vswhere.exe`
+        // as a bare command, so it must be on PATH. It ships in the VS Installer dir,
+        // which is usually NOT on PATH. Add it so a plain `cargo build` can link.
+        ensure_vswhere_on_path(&mut cmd);
+        let status = cmd.status();
         match status {
             Ok(s) if s.success() => {
-                if dest_exe.exists() {
-                    println!(
-                        "cargo:warning=UAssetTool published to {}",
-                        dest_exe.display()
-                    );
-                    published = true;
+                let built_lib = native_dir.join(lib_name);
+                if built_lib.exists() {
+                    match fs::copy(&built_lib, &dest_lib) {
+                        Ok(_) => {
+                            println!("cargo:warning=UAssetTool AOT library -> {}", dest_lib.display());
+                            produced = true;
+                            copy_native_deps(&publish_dir, &tool_output_dir);
+                        }
+                        Err(e) => println!(
+                            "cargo:warning=Failed to copy {} to {}: {}",
+                            built_lib.display(),
+                            dest_lib.display(),
+                            e
+                        ),
+                    }
                 } else {
                     println!(
                         "cargo:warning=dotnet publish succeeded but {} not found",
-                        dest_exe.display()
+                        built_lib.display()
                     );
                 }
             }
-            Ok(s) => {
-                println!("cargo:warning=dotnet publish failed with status: {}", s);
-            }
-            Err(e) => {
-                println!("cargo:warning=failed to run dotnet publish: {}", e);
-            }
+            Ok(s) => println!("cargo:warning=dotnet publish failed with status: {}", s),
+            Err(e) => println!("cargo:warning=failed to run dotnet publish: {}", e),
         }
     } else {
-        println!("cargo:warning=dotnet not found; attempting to use precompiled UAssetTool");
+        println!("cargo:warning=dotnet not found; looking for a precompiled UAssetTool library");
     }
 
-    // 2) If publish not successful, fallback to existing precompiled build
-    if !published {
-        let precompiled_paths = [
-            tool_project_dir
-                .join("bin")
-                .join("Release")
-                .join("net8.0")
-                .join(runtime_id)
-                .join("publish")
-                .join(exe_name),
-            tool_project_dir
-                .join("bin")
-                .join("Release")
-                .join("net8.0")
-                .join(runtime_id)
-                .join(exe_name),
-            tool_project_dir
-                .join("bin")
-                .join("Debug")
-                .join("net8.0")
-                .join(runtime_id)
-                .join(exe_name),
-        ];
-
-        let mut copied = false;
-        for precompiled_path in &precompiled_paths {
-            if precompiled_path.exists() {
-                if let Err(e) = fs::copy(precompiled_path, &dest_exe) {
+    // 2) Fall back to an already-built library (native or publish dir).
+    if !produced {
+        for candidate in [native_dir.join(lib_name), publish_dir.join(lib_name)] {
+            if candidate.exists() {
+                if let Err(e) = fs::copy(&candidate, &dest_lib) {
                     println!(
                         "cargo:warning=Failed to copy precompiled {} to {}: {}",
-                        precompiled_path.display(),
-                        dest_exe.display(),
+                        candidate.display(),
+                        dest_lib.display(),
                         e
                     );
                     continue;
                 }
                 println!(
-                    "cargo:warning=Using precompiled UAssetTool from: {}",
-                    precompiled_path.display()
+                    "cargo:warning=Using precompiled UAssetTool library: {}",
+                    candidate.display()
                 );
-                println!("cargo:warning=UAssetTool copied to: {}", dest_exe.display());
-                copied = true;
+                copy_native_deps(&publish_dir, &tool_output_dir);
+                produced = true;
                 break;
             }
         }
+    }
 
-        if !copied {
-            let build_cmd = format!("dotnet publish UAssetToolRivals/src/UAssetTool -c Release -r {} --self-contained true", runtime_id);
-            panic!("UAssetTool is required but was not produced. Ensure .NET SDK is installed or precompile via: '{}'", build_cmd);
+    // 3) Nothing produced. The Rust crate still compiles (the library is only needed
+    //    at runtime), so don't fail debug builds — but a release build that ships
+    //    without the library would be broken, so fail loudly there.
+    if !produced {
+        let msg = format!(
+            "UAssetTool native library was not produced. Install the .NET SDK + NativeAOT \
+             prerequisites (C/C++ toolchain) and build with: \
+             'dotnet publish UAssetToolRivals/src/UAssetTool/UAssetToolNative.csproj -c Release -r {}'",
+            runtime_id
+        );
+        let profile = env::var("PROFILE").unwrap_or_default();
+        if profile == "release" {
+            panic!("{}", msg);
+        } else {
+            println!("cargo:warning={}", msg);
+            println!(
+                "cargo:warning=Continuing debug build without the native library; \
+                 UAssetTool calls will fail at runtime until it is built."
+            );
+        }
+    }
+}
+
+/// Ensure the directory containing `vswhere.exe` is on the child command's PATH.
+///
+/// NativeAOT's native link step shells out to `vswhere.exe` (no full path) to find the
+/// MSVC linker. `vswhere.exe` lives in the VS Installer directory, which is typically not
+/// on PATH; without it the link fails with a confusing error. No-op off Windows / when
+/// already discoverable.
+#[cfg(windows)]
+fn ensure_vswhere_on_path(cmd: &mut Command) {
+    let candidates = [
+        env::var("ProgramFiles(x86)").ok(),
+        env::var("ProgramFiles").ok(),
+    ];
+    for base in candidates.into_iter().flatten() {
+        let installer = Path::new(&base)
+            .join("Microsoft Visual Studio")
+            .join("Installer");
+        if installer.join("vswhere.exe").exists() {
+            let current = env::var("PATH").unwrap_or_default();
+            cmd.env("PATH", format!("{};{}", installer.display(), current));
+            println!("cargo:warning=Added VS Installer dir to PATH for AOT link: {}", installer.display());
+            return;
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn ensure_vswhere_on_path(_cmd: &mut Command) {}
+
+/// Copy native dependency libraries that NativeAOT does not statically link into the
+/// main library (e.g. blake3_dotnet.dll) next to it, so the OS can resolve them.
+fn copy_native_deps(src_dir: &Path, dest_dir: &Path) {
+    let native_deps = [
+        "blake3_dotnet.dll",
+        "libblake3_dotnet.so",
+        "libblake3_dotnet.dylib",
+    ];
+
+    for dep_name in &native_deps {
+        let src = src_dir.join(dep_name);
+        if src.exists() {
+            let dst = dest_dir.join(dep_name);
+            match fs::copy(&src, &dst) {
+                Ok(_) => println!("cargo:warning=Copied native dependency {}", dep_name),
+                Err(e) => println!(
+                    "cargo:warning=Failed to copy native dep {} to {}: {}",
+                    src.display(),
+                    dst.display(),
+                    e
+                ),
+            }
         }
     }
 }

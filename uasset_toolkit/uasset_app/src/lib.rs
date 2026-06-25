@@ -1,98 +1,118 @@
 use anyhow::{Context, Result};
+use libloading::{Library, Symbol};
 use serde::{Deserialize, Serialize};
-use std::io::{BufRead, BufReader as StdBufReader, Write};
+use std::ffi::{CStr, CString};
+use std::os::raw::c_char;
 use std::path::Path;
-use std::process::Stdio;
-use std::process::{
-    Child as StdChild, ChildStdin as StdChildStdin, Command as StdCommand,
-};
-use std::sync::{mpsc, Mutex as StdMutex, OnceLock};
-use std::thread;
-use std::time::Duration;
-
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
+use std::sync::{Mutex as StdMutex, OnceLock};
 
 // ============================================================================
-// SYNCHRONOUS UASSETTOOL WRAPPER
+// SYNCHRONOUS UASSETTOOL WRAPPER (in-process NativeAOT FFI)
 // ============================================================================
-// This module provides a synchronous interface to UAssetTool using standard
-// library primitives only (no async/tokio) to avoid cross-runtime deadlock issues.
+// This module provides a synchronous interface to UAssetTool. It loads the
+// NativeAOT-compiled UAssetTool library (UAssetTool.dll / .so / .dylib) and calls
+// the C-exported `uat_invoke` / `uat_free` functions directly. No child process,
+// no stdin/stdout pipe.
 //
-// Thread-safety: Uses std::sync::Mutex for thread-safe access to the child process.
+// The wire format is unchanged: requests/responses are the same JSON that the
+// tool's interactive stdin/stdout mode speaks. Only the transport changed, so the
+// request/response types and every public method below are identical to before.
+//
+// Thread-safety: a std::sync::Mutex serializes calls into the native tool, matching
+// the previous single-process behavior (UAssetAPI / ProcessRequest keep static
+// state and were never called concurrently).
 // ============================================================================
+
+/// `uat_invoke(const char* request_utf8) -> char*` — JSON in, JSON out. The returned
+/// buffer is owned by the native side and must be released with `uat_free`.
+type UatInvokeFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
+/// `uat_free(char*)` — release a buffer returned by `uat_invoke`.
+type UatFreeFn = unsafe extern "C" fn(*mut c_char);
 
 /// Global singleton for the synchronous UAssetToolkit
 static GLOBAL_TOOLKIT_SYNC: OnceLock<SyncToolkit> = OnceLock::new();
 
-/// Synchronous child process handle using channel-based communication for timeout support
-struct SyncChildProcess {
-    _child: StdChild,
-    stdin: StdChildStdin,
-    response_rx: mpsc::Receiver<std::io::Result<String>>,
-}
-
-/// Synchronous toolkit that manages a persistent UAssetTool process
+/// Synchronous toolkit that holds the loaded UAssetTool native library and calls
+/// into it directly. The library is loaded once and kept for the process lifetime.
 pub struct SyncToolkit {
-    tool_path: String,
-    process: StdMutex<Option<SyncChildProcess>>,
+    lib: Library,
+    /// Serializes calls into the native tool (see module note on thread-safety).
+    call_lock: StdMutex<()>,
 }
 
 impl SyncToolkit {
-    pub fn new(tool_path: Option<String>) -> Result<Self> {
-        let tool_path = match tool_path {
+    /// Load the native toolkit. `dll_path` overrides auto-discovery when provided
+    /// (the old `tool_path` argument; kept so existing call sites compile unchanged).
+    pub fn new(dll_path: Option<String>) -> Result<Self> {
+        let dll_path = match dll_path {
             Some(path) => path,
-            None => Self::find_tool_path()?,
+            None => Self::find_dll_path()?,
         };
 
+        log::info!("[SyncToolkit] Loading UAssetTool native library: {}", dll_path);
+        let lib = unsafe { Library::new(&dll_path) }
+            .with_context(|| format!("Failed to load UAssetTool native library at: {}", dll_path))?;
+        log::info!("[SyncToolkit] Native library loaded successfully");
+
         Ok(Self {
-            tool_path,
-            process: StdMutex::new(None),
+            lib,
+            call_lock: StdMutex::new(()),
         })
     }
 
-    fn find_tool_path() -> Result<String> {
-        let exe_name = Self::get_tool_executable_name();
+    /// Native library file name for the current platform.
+    fn get_dll_name() -> &'static str {
+        #[cfg(windows)]
+        {
+            "UAssetTool.dll"
+        }
+        #[cfg(target_os = "linux")]
+        {
+            "libUAssetTool.so"
+        }
+        #[cfg(target_os = "macos")]
+        {
+            "libUAssetTool.dylib"
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        {
+            "UAssetTool.dll"
+        }
+    }
+
+    /// Locate the native library: beside the executable first (where build.rs copies
+    /// it), then a legacy `uassettool/` subdir, then the dev publish output.
+    fn find_dll_path() -> Result<String> {
+        let dll_name = Self::get_dll_name();
         let exe_path = std::env::current_exe()?;
         let exe_dir = exe_path
             .parent()
             .context("Failed to get executable directory")?;
-        let tool_path = exe_dir.join("uassettool").join(exe_name);
 
-        if tool_path.exists() {
-            return Ok(tool_path.to_string_lossy().to_string());
+        // Primary: beside the executable.
+        let beside = exe_dir.join(dll_name);
+        if beside.exists() {
+            return Ok(beside.to_string_lossy().to_string());
         }
 
-        // Try relative to workspace
-        let workspace_tool = Path::new("target/uassettool").join(exe_name);
-        if workspace_tool.exists() {
-            return Ok(workspace_tool.to_string_lossy().to_string());
+        // Legacy: a `uassettool/` subdirectory next to the executable.
+        let legacy = exe_dir.join("uassettool").join(dll_name);
+        if legacy.exists() {
+            return Ok(legacy.to_string_lossy().to_string());
         }
 
-        // Try dev path with platform-specific runtime identifier
+        // Dev: NativeAOT publish output inside the submodule.
         let runtime_id = Self::get_runtime_identifier();
-        let dev_tool = Path::new("uasset_toolkit/tools/UAssetTool/bin/Release/net8.0")
+        let dev_tool = Path::new("UAssetToolRivals/src/UAssetTool/bin_native/Release/net8.0")
             .join(runtime_id)
-            .join("publish")
-            .join(exe_name);
+            .join("native")
+            .join(dll_name);
         if dev_tool.exists() {
             return Ok(dev_tool.to_string_lossy().to_string());
         }
 
-        // Default assumption
-        Ok(tool_path.to_string_lossy().to_string())
-    }
-
-    /// Get the executable name based on the current platform
-    fn get_tool_executable_name() -> &'static str {
-        #[cfg(windows)]
-        {
-            "UAssetTool.exe"
-        }
-        #[cfg(not(windows))]
-        {
-            "UAssetTool"
-        }
+        // Default assumption: beside the executable (will surface a clear load error).
+        Ok(beside.to_string_lossy().to_string())
     }
 
     /// Get the .NET runtime identifier for the current platform
@@ -116,141 +136,51 @@ impl SyncToolkit {
     }
 
     fn send_request(&self, request: &UAssetRequest) -> Result<UAssetResponse> {
-        let mut process_guard = self
-            .process
-            .lock()
-            .map_err(|e| anyhow::anyhow!("Failed to acquire process lock: {}", e))?;
-
-        // Start process if not running
-        if process_guard.is_none() {
-            log::info!(
-                "[SyncToolkit] Starting new UAssetTool process: {}",
-                self.tool_path
-            );
-
-            if !Path::new(&self.tool_path).exists() {
-                anyhow::bail!("UAssetTool executable not found at: {}", self.tool_path);
-            }
-
-            let mut cmd = StdCommand::new(&self.tool_path);
-            cmd.stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::inherit()); // MUST inherit stderr to avoid deadlock from buffer filling
-
-            #[cfg(windows)]
-            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-
-            let mut child = cmd.spawn().context("Failed to spawn UAssetTool process")?;
-
-            let stdin = child.stdin.take().context("Failed to get stdin")?;
-            let stdout = child.stdout.take().context("Failed to get stdout")?;
-
-            // Create channel for timeout-safe reading
-            let (tx, rx) = mpsc::channel();
-
-            // Spawn reader thread that sends lines through channel
-            thread::spawn(move || {
-                let reader = StdBufReader::new(stdout);
-                for line in reader.lines() {
-                    if tx.send(line).is_err() {
-                        break; // Channel closed, stop reading
-                    }
-                }
-            });
-
-            *process_guard = Some(SyncChildProcess {
-                _child: child,
-                stdin,
-                response_rx: rx,
-            });
-            log::info!("[SyncToolkit] UAssetTool process started successfully");
-        }
-
-        let proc = process_guard.as_mut().unwrap();
         let request_json = serde_json::to_string(request)?;
 
         log::info!(
-            "[SyncToolkit] Sending request: {}...",
+            "[SyncToolkit] Invoking native: {}...",
             &request_json[..std::cmp::min(200, request_json.len())]
         );
 
-        // Write request
-        if let Err(e) = writeln!(proc.stdin, "{}", request_json) {
-            *process_guard = None;
-            anyhow::bail!("Failed to write to UAssetTool: {}", e);
-        }
+        // JSON text never contains an interior NUL, but guard anyway rather than panic.
+        let c_request = CString::new(request_json)
+            .map_err(|e| anyhow::anyhow!("Request JSON contained an interior NUL byte: {}", e))?;
 
-        if let Err(e) = proc.stdin.flush() {
-            *process_guard = None;
-            anyhow::bail!("Failed to flush to UAssetTool: {}", e);
-        }
+        // Serialize calls into the native tool (see module note on thread-safety).
+        let _guard = self
+            .call_lock
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Failed to acquire call lock: {}", e))?;
 
-        log::info!("[SyncToolkit] Request sent, waiting for response (timeout: 5 min)...");
+        unsafe {
+            let invoke: Symbol<UatInvokeFn> = self
+                .lib
+                .get(b"uat_invoke\0")
+                .map_err(|e| anyhow::anyhow!("FFI symbol `uat_invoke` not found: {}", e))?;
+            let free: Symbol<UatFreeFn> = self
+                .lib
+                .get(b"uat_free\0")
+                .map_err(|e| anyhow::anyhow!("FFI symbol `uat_free` not found: {}", e))?;
 
-        // Read response with timeout (5 minutes for large batch operations)
-        // Skip non-JSON lines (e.g. log output that leaked to stdout) until we get a valid JSON response
-        let timeout = Duration::from_secs(300);
-        let deadline = std::time::Instant::now() + timeout;
-        loop {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() {
-                log::error!(
-                    "[SyncToolkit] TIMEOUT waiting for UAssetTool response after {:?}",
-                    timeout
-                );
-                *process_guard = None;
-                anyhow::bail!(
-                    "Timeout waiting for UAssetTool response after {:?}",
-                    timeout
-                );
+            let response_ptr = invoke(c_request.as_ptr());
+            if response_ptr.is_null() {
+                anyhow::bail!("uat_invoke returned null (native fatal error)");
             }
-            match proc.response_rx.recv_timeout(remaining) {
-                Ok(Ok(line)) => {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    // JSON responses start with '{' — skip anything else (log lines)
-                    if !trimmed.starts_with('{') {
-                        log::warn!(
-                            "[SyncToolkit] Skipping non-JSON stdout line: {}",
-                            &trimmed[..std::cmp::min(200, trimmed.len())]
-                        );
-                        continue;
-                    }
-                    log::info!("[SyncToolkit] Got response: {} bytes", line.len());
-                    match serde_json::from_str::<UAssetResponse>(&line) {
-                        Ok(response) => return Ok(response),
-                        Err(e) => {
-                            *process_guard = None;
-                            anyhow::bail!(
-                                "Failed to parse response: {} (Line: {})",
-                                e,
-                                &line[..std::cmp::min(500, line.len())]
-                            );
-                        }
-                    }
-                }
-                Ok(Err(e)) => {
-                    *process_guard = None;
-                    anyhow::bail!("Failed to read from UAssetTool: {}", e);
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    log::error!(
-                        "[SyncToolkit] TIMEOUT waiting for UAssetTool response after {:?}",
-                        timeout
-                    );
-                    *process_guard = None;
-                    anyhow::bail!(
-                        "Timeout waiting for UAssetTool response after {:?}",
-                        timeout
-                    );
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    *process_guard = None;
-                    anyhow::bail!("UAssetTool process closed connection (channel disconnected)");
-                }
-            }
+
+            // Copy the response out, then hand the buffer back to the native side.
+            let response_json = CStr::from_ptr(response_ptr).to_string_lossy().into_owned();
+            free(response_ptr);
+
+            log::info!("[SyncToolkit] Got response: {} bytes", response_json.len());
+
+            serde_json::from_str::<UAssetResponse>(&response_json).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to parse response: {} (Response: {})",
+                    e,
+                    &response_json[..std::cmp::min(500, response_json.len())]
+                )
+            })
         }
     }
 

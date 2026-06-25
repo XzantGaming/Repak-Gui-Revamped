@@ -24,8 +24,8 @@ if ($status) {
             git add .
             git commit -m "$msg"
             # Explicitly pushing head to origin since detached head is common in submodules
-            # Assuming 'main' is the branch we want to be on.
-            git push origin HEAD:main
+            # The submodule now lives on the 'aot' branch (NativeAOT FFI build).
+            git push origin HEAD:aot
             Write-Host "Changes pushed to submodule remote." -ForegroundColor Green
         }
     }
