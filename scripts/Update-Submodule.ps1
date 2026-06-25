@@ -12,7 +12,7 @@ if (-not (Test-Path "$submodulePath")) {
 
 Write-Host "Fetching latest changes for '$submoduleFolder'..." -ForegroundColor Cyan
 
-# Update the submodule to track the remote main branch
+# Update the submodule to track its remote branch (aot, per .gitmodules)
 git submodule update --remote --merge $submoduleFolder
 
 Write-Host "Done." -ForegroundColor Green

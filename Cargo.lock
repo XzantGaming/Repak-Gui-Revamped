@@ -7309,6 +7309,7 @@ name = "uasset_app"
 version = "1.4.3"
 dependencies = [
  "anyhow",
+ "libloading 0.8.6",
  "log",
  "serde",
  "serde_json",
