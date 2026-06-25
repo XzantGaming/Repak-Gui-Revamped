@@ -31,8 +31,6 @@ $root = Get-WorkspaceRoot
 $targetDir = Join-Path $root "target"
 $profileDir = Join-Path $targetDir $Configuration
 $exePath = Join-Path $profileDir "REPAK-X.exe"
-$bridgeDir = Join-Path $profileDir "uassetbridge"
-$bridgeExe = Join-Path $bridgeDir "UAssetBridge.exe"
 
 # Build the project (this will also auto-publish UAssetBridge via build.rs changes)
 Push-Location $root
@@ -41,9 +39,6 @@ Pop-Location
 
 # Verify outputs
 if (!(Test-Path $exePath)) { throw "REPAK-X.exe not found at $exePath" }
-if (!(Test-Path $bridgeExe)) {
-    Write-Warning "UAssetBridge.exe not found at $bridgeExe. Texture pipeline will be disabled."
-}
 
 # Determine app version from workspace Cargo.toml (or fallback to repak-gui/Cargo.toml)
 $cargoRoot = Join-Path $root "Cargo.toml"
@@ -61,12 +56,6 @@ New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 # Copy main binary
 Copy-Item -LiteralPath $exePath -Destination (Join-Path $distDir "REPAK-X.exe") -Force
 
-# Copy uassetbridge directory if present
-if (Test-Path $bridgeDir) {
-    $destBridgeDir = Join-Path $distDir "uassetbridge"
-    New-Item -ItemType Directory -Force -Path $destBridgeDir | Out-Null
-    Copy-Item -Path (Join-Path $bridgeDir "*") -Destination $destBridgeDir -Recurse -Force
-}
 
 # Build and copy AssetTypeCli
 Write-Host "Building AssetTypeCli..." -ForegroundColor Cyan

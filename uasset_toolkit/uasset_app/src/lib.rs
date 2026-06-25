@@ -135,9 +135,9 @@ impl SyncToolkit {
         } // fallback
     }
 
-    fn send_request(&self, request: &UAssetRequest) -> Result<UAssetResponse> {
-        let request_json = serde_json::to_string(request)?;
-
+    /// Low-level FFI call: send a raw JSON request envelope and return the raw JSON
+    /// response string. Serializes concurrent calls into the native tool via `call_lock`.
+    fn invoke_raw(&self, request_json: &str) -> Result<String> {
         log::info!(
             "[SyncToolkit] Invoking native: {}...",
             &request_json[..std::cmp::min(200, request_json.len())]
@@ -173,15 +173,20 @@ impl SyncToolkit {
             free(response_ptr);
 
             log::info!("[SyncToolkit] Got response: {} bytes", response_json.len());
-
-            serde_json::from_str::<UAssetResponse>(&response_json).map_err(|e| {
-                anyhow::anyhow!(
-                    "Failed to parse response: {} (Response: {})",
-                    e,
-                    &response_json[..std::cmp::min(500, response_json.len())]
-                )
-            })
+            Ok(response_json)
         }
+    }
+
+    fn send_request(&self, request: &UAssetRequest) -> Result<UAssetResponse> {
+        let request_json = serde_json::to_string(request)?;
+        let response_json = self.invoke_raw(&request_json)?;
+        serde_json::from_str::<UAssetResponse>(&response_json).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to parse response: {} (Response: {})",
+                e,
+                &response_json[..std::cmp::min(500, response_json.len())]
+            )
+        })
     }
 
     pub fn batch_detect_skeletal_mesh(&self, file_paths: &[String]) -> Result<bool> {
@@ -553,6 +558,22 @@ pub fn init_global_toolkit() -> Result<()> {
     get_global_toolkit()?;
     log::info!("[SyncToolkit] Global singleton initialized successfully");
     Ok(())
+}
+
+/// Invoke the native UAssetTool with a raw JSON request envelope and return the raw JSON
+/// response, going through the process-global toolkit (loaded on first use). For callers
+/// that build their own request JSON and parse their own response shape — e.g. the VFX
+/// pipeline — while still using the in-process FFI instead of spawning a child process.
+pub fn invoke_json(request_json: &str) -> Result<String> {
+    let toolkit = get_global_toolkit()?;
+    toolkit.invoke_raw(request_json)
+}
+
+/// Resolve the on-disk path of the native UAssetTool library (the location the FFI loads
+/// it from — beside the executable, then legacy/dev fallbacks). Exposed so callers can
+/// surface the tool location to the UI/logs; loading itself is handled by the FFI.
+pub fn native_library_path() -> Result<String> {
+    SyncToolkit::find_dll_path()
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -2,14 +2,14 @@
 fn main() {
     // Tauri build - handles icons and resources
     tauri_build::build();
-    
+
     // Platform-specific build steps
     #[cfg(windows)]
     windows_build();
-    
+
     #[cfg(target_os = "linux")]
     linux_build();
-    
+
     #[cfg(target_os = "macos")]
     macos_build();
 }
@@ -17,11 +17,12 @@ fn main() {
 #[cfg(target_os = "linux")]
 fn linux_build() {
     use std::{env, fs, path::Path, path::PathBuf};
-    
+
     // Compute key paths from OUT_DIR
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let target_dir = out_dir
-        .parent().and_then(Path::parent)
+        .parent()
+        .and_then(Path::parent)
         .and_then(Path::parent)
         .and_then(Path::parent)
         .map(|p| p.to_path_buf())
@@ -29,19 +30,41 @@ fn linux_build() {
 
     let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
     let exe_dir = target_dir.join(&profile);
-    
+
     // 1) Copy UAssetTool (Linux executable, no .exe)
     let dest_dir = exe_dir.join("uassettool");
     let dest_path = dest_dir.join("UAssetTool");
-    
+
     let primary_src = target_dir.join("uassettool").join("UAssetTool");
-    
-    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
-    let tools_dir = workspace_root.join("UAssetToolRivals").join("src").join("UAssetTool");
-    let fallback_release_publish = tools_dir.join("bin").join("Release").join("net8.0").join("linux-x64").join("publish").join("UAssetTool");
-    let fallback_release = tools_dir.join("bin").join("Release").join("net8.0").join("linux-x64").join("UAssetTool");
-    let fallback_debug = tools_dir.join("bin").join("Debug").join("net8.0").join("linux-x64").join("UAssetTool");
-    
+
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let tools_dir = workspace_root
+        .join("UAssetToolRivals")
+        .join("src")
+        .join("UAssetTool");
+    let fallback_release_publish = tools_dir
+        .join("bin")
+        .join("Release")
+        .join("net8.0")
+        .join("linux-x64")
+        .join("publish")
+        .join("UAssetTool");
+    let fallback_release = tools_dir
+        .join("bin")
+        .join("Release")
+        .join("net8.0")
+        .join("linux-x64")
+        .join("UAssetTool");
+    let fallback_debug = tools_dir
+        .join("bin")
+        .join("Debug")
+        .join("net8.0")
+        .join("linux-x64")
+        .join("UAssetTool");
+
     let source = if primary_src.exists() {
         Some(primary_src)
     } else if fallback_release_publish.exists() {
@@ -53,10 +76,14 @@ fn linux_build() {
     } else {
         None
     };
-    
+
     if let Some(src) = source {
         if let Err(e) = fs::create_dir_all(&dest_dir) {
-            println!("cargo:warning=failed to create {}: {}", dest_dir.display(), e);
+            println!(
+                "cargo:warning=failed to create {}: {}",
+                dest_dir.display(),
+                e
+            );
         } else {
             match fs::copy(&src, &dest_path) {
                 Ok(_) => {
@@ -73,10 +100,15 @@ fn linux_build() {
                     }
                 }
                 Err(e) => {
-                    println!("cargo:warning=failed to copy {} to {}: {}", src.display(), dest_path.display(), e);
+                    println!(
+                        "cargo:warning=failed to copy {} to {}: {}",
+                        src.display(),
+                        dest_path.display(),
+                        e
+                    );
                 }
             }
-            
+
             // Copy required dependencies and config files
             let src_dir = src.parent().unwrap();
             let required_files = vec![
@@ -85,20 +117,29 @@ fn linux_build() {
                 "Newtonsoft.Json.dll",
                 "ZstdSharp.dll",
                 "UAssetTool.runtimeconfig.json",
-                "UAssetTool.deps.json"
+                "UAssetTool.deps.json",
             ];
-            
+
             for file_name in required_files {
                 let file_src = src_dir.join(file_name);
                 let file_dest = dest_dir.join(file_name);
-                
+
                 if file_src.exists() {
                     match fs::copy(&file_src, &file_dest) {
                         Ok(_) => {
-                            println!("cargo:warning={} copied to {}", file_name, file_dest.display());
+                            println!(
+                                "cargo:warning={} copied to {}",
+                                file_name,
+                                file_dest.display()
+                            );
                         }
                         Err(e) => {
-                            println!("cargo:warning=failed to copy {} to {}: {}", file_src.display(), file_dest.display(), e);
+                            println!(
+                                "cargo:warning=failed to copy {} to {}: {}",
+                                file_src.display(),
+                                file_dest.display(),
+                                e
+                            );
                         }
                     }
                 }
@@ -107,37 +148,55 @@ fn linux_build() {
     } else {
         println!("cargo:warning=UAssetTool not found. To enable asset pipeline, build it via: 'dotnet publish UAssetToolRivals/src/UAssetTool -c Release -r linux-x64 --self-contained true'");
     }
-    
+
     // 2) Copy character_data.json to data folder
-    let char_data_src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src").join("data").join("character_data.json");
+    let char_data_src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("data")
+        .join("character_data.json");
     let char_data_dest_dir = exe_dir.join("data");
     let char_data_dest = char_data_dest_dir.join("character_data.json");
-    
+
     if char_data_src.exists() {
         if let Err(e) = fs::create_dir_all(&char_data_dest_dir) {
-            println!("cargo:warning=failed to create data directory {}: {}", char_data_dest_dir.display(), e);
+            println!(
+                "cargo:warning=failed to create data directory {}: {}",
+                char_data_dest_dir.display(),
+                e
+            );
         } else {
             match fs::copy(&char_data_src, &char_data_dest) {
                 Ok(_) => {
-                    println!("cargo:warning=character_data.json copied to {}", char_data_dest.display());
+                    println!(
+                        "cargo:warning=character_data.json copied to {}",
+                        char_data_dest.display()
+                    );
                 }
                 Err(e) => {
-                    println!("cargo:warning=failed to copy character_data.json to {}: {}", char_data_dest.display(), e);
+                    println!(
+                        "cargo:warning=failed to copy character_data.json to {}: {}",
+                        char_data_dest.display(),
+                        e
+                    );
                 }
             }
         }
     } else {
-        println!("cargo:warning=character_data.json not found at {}", char_data_src.display());
+        println!(
+            "cargo:warning=character_data.json not found at {}",
+            char_data_src.display()
+        );
     }
 }
 
 #[cfg(target_os = "macos")]
 fn macos_build() {
     use std::{env, fs, path::Path, path::PathBuf};
-    
+
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let target_dir = out_dir
-        .parent().and_then(Path::parent)
+        .parent()
+        .and_then(Path::parent)
         .and_then(Path::parent)
         .and_then(Path::parent)
         .map(|p| p.to_path_buf())
@@ -145,27 +204,41 @@ fn macos_build() {
 
     let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
     let exe_dir = target_dir.join(&profile);
-    
+
     // Copy character_data.json
-    let char_data_src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src").join("data").join("character_data.json");
+    let char_data_src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("data")
+        .join("character_data.json");
     let char_data_dest_dir = exe_dir.join("data");
     let char_data_dest = char_data_dest_dir.join("character_data.json");
-    
+
     if char_data_src.exists() {
         if let Err(e) = fs::create_dir_all(&char_data_dest_dir) {
-            println!("cargo:warning=failed to create data directory {}: {}", char_data_dest_dir.display(), e);
+            println!(
+                "cargo:warning=failed to create data directory {}: {}",
+                char_data_dest_dir.display(),
+                e
+            );
         } else {
             match fs::copy(&char_data_src, &char_data_dest) {
                 Ok(_) => {
-                    println!("cargo:warning=character_data.json copied to {}", char_data_dest.display());
+                    println!(
+                        "cargo:warning=character_data.json copied to {}",
+                        char_data_dest.display()
+                    );
                 }
                 Err(e) => {
-                    println!("cargo:warning=failed to copy character_data.json to {}: {}", char_data_dest.display(), e);
+                    println!(
+                        "cargo:warning=failed to copy character_data.json to {}: {}",
+                        char_data_dest.display(),
+                        e
+                    );
                 }
             }
         }
     }
-    
+
     println!("cargo:warning=macOS build: UAssetTool support requires 'dotnet publish -r osx-x64'");
 }
 
@@ -179,7 +252,8 @@ fn windows_build() {
     // Compute key paths from OUT_DIR
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let target_dir = out_dir
-        .parent().and_then(Path::parent)
+        .parent()
+        .and_then(Path::parent)
         .and_then(Path::parent)
         .and_then(Path::parent)
         .map(|p| p.to_path_buf())
@@ -188,15 +262,37 @@ fn windows_build() {
     let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
     let exe_dir = target_dir.join(&profile);
     let dest_dir = exe_dir.join("uassettool");
-    let dest_path = dest_dir.join("UAssetTool.exe");
+    let dest_path = dest_dir.join("UAssetTool.dll");
 
-    let primary_src = target_dir.join("uassettool").join("UAssetTool.exe");
+    let primary_src = target_dir.join("uassettool").join("UAssetTool.dll");
 
-    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
-    let tools_dir = workspace_root.join("UAssetToolRivals").join("src").join("UAssetTool");
-    let fallback_release_publish = tools_dir.join("bin").join("Release").join("net8.0").join("win-x64").join("publish").join("UAssetTool.exe");
-    let fallback_release = tools_dir.join("bin").join("Release").join("net8.0").join("win-x64").join("UAssetTool.exe");
-    let fallback_debug = tools_dir.join("bin").join("Debug").join("net8.0").join("win-x64").join("UAssetTool.exe");
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let tools_dir = workspace_root
+        .join("UAssetToolRivals")
+        .join("src")
+        .join("UAssetTool");
+    let fallback_release_publish = tools_dir
+        .join("bin")
+        .join("Release")
+        .join("net8.0")
+        .join("win-x64")
+        .join("publish")
+        .join("UAssetTool.dll");
+    let fallback_release = tools_dir
+        .join("bin")
+        .join("Release")
+        .join("net8.0")
+        .join("win-x64")
+        .join("UAssetTool.dll");
+    let fallback_debug = tools_dir
+        .join("bin")
+        .join("Debug")
+        .join("net8.0")
+        .join("win-x64")
+        .join("UAssetTool.dll");
 
     let source = if primary_src.exists() {
         Some(primary_src)
@@ -212,77 +308,68 @@ fn windows_build() {
 
     if let Some(src) = source {
         if let Err(e) = fs::create_dir_all(&dest_dir) {
-            println!("cargo:warning=failed to create {}: {}", dest_dir.display(), e);
+            println!(
+                "cargo:warning=failed to create {}: {}",
+                dest_dir.display(),
+                e
+            );
         } else {
             match fs::copy(&src, &dest_path) {
                 Ok(_) => {
                     println!("cargo:warning=UAssetTool copied to {}", dest_path.display());
                 }
                 Err(e) => {
-                    println!("cargo:warning=failed to copy {} to {}: {}", src.display(), dest_path.display(), e);
-                }
-            }
-            
-            let src_dir = src.parent().unwrap();
-            let dll_fallback_dir = tools_dir.join("bin").join("Release").join("net8.0").join("win-x64").join("publish");
-            
-            let required_files = vec![
-                "UAssetTool.dll", 
-                "UAssetAPI.dll", 
-                "Newtonsoft.Json.dll", 
-                "ZstdSharp.dll",
-                "UAssetTool.runtimeconfig.json",
-                "UAssetTool.deps.json"
-            ];
-            
-            for dll_name in required_files {
-                let mut dll_src = src_dir.join(dll_name);
-                
-                if !dll_src.exists() && dll_fallback_dir.exists() {
-                    dll_src = dll_fallback_dir.join(dll_name);
-                }
-                
-                let dll_dest = dest_dir.join(dll_name);
-                
-                if dll_src.exists() {
-                    match fs::copy(&dll_src, &dll_dest) {
-                        Ok(_) => {
-                            println!("cargo:warning={} copied to {}", dll_name, dll_dest.display());
-                        }
-                        Err(e) => {
-                            println!("cargo:warning=failed to copy {} to {}: {}", dll_src.display(), dll_dest.display(), e);
-                        }
-                    }
-                } else {
-                    println!("cargo:warning={} not found at {} or fallback", dll_name, src_dir.display());
+                    println!(
+                        "cargo:warning=failed to copy {} to {}: {}",
+                        src.display(),
+                        dest_path.display(),
+                        e
+                    );
                 }
             }
         }
     } else {
-        println!("cargo:warning=UAssetTool.exe not found. To enable asset pipeline, build it via: 'dotnet publish UAssetToolRivals/src/UAssetTool -c Release -r win-x64 --self-contained true'");
+        println!("cargo:warning=UAssetTool.dll not found. To enable asset pipeline, build it via: 'dotnet publish UAssetToolRivals/src/UAssetTool/UAssetToolNative.csproj -c Release -r win-x64'");
     }
 
     // Oodle DLL is downloaded on-demand by oodle_loader
 
     // Copy character_data.json to data folder
-    let char_data_src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src").join("data").join("character_data.json");
+    let char_data_src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("data")
+        .join("character_data.json");
     let char_data_dest_dir = exe_dir.join("data");
     let char_data_dest = char_data_dest_dir.join("character_data.json");
-    
+
     if char_data_src.exists() {
         if let Err(e) = fs::create_dir_all(&char_data_dest_dir) {
-            println!("cargo:warning=failed to create data directory {}: {}", char_data_dest_dir.display(), e);
+            println!(
+                "cargo:warning=failed to create data directory {}: {}",
+                char_data_dest_dir.display(),
+                e
+            );
         } else {
             match fs::copy(&char_data_src, &char_data_dest) {
                 Ok(_) => {
-                    println!("cargo:warning=character_data.json copied to {}", char_data_dest.display());
+                    println!(
+                        "cargo:warning=character_data.json copied to {}",
+                        char_data_dest.display()
+                    );
                 }
                 Err(e) => {
-                    println!("cargo:warning=failed to copy character_data.json to {}: {}", char_data_dest.display(), e);
+                    println!(
+                        "cargo:warning=failed to copy character_data.json to {}: {}",
+                        char_data_dest.display(),
+                        e
+                    );
                 }
             }
         }
     } else {
-        println!("cargo:warning=character_data.json not found at {}", char_data_src.display());
+        println!(
+            "cargo:warning=character_data.json not found at {}",
+            char_data_src.display()
+        );
     }
 }

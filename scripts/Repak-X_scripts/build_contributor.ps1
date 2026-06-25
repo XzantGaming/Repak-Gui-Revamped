@@ -122,7 +122,7 @@ try {
     # Ensure no previous instances are running and locking files
     Kill-Process-Safe "UAssetTool"
     
-    $toolProject = Join-Path $workspaceRoot "UAssetToolRivals\src\UAssetTool\UAssetTool.csproj"
+    $toolProject = Join-Path $workspaceRoot "UAssetToolRivals\src\UAssetTool\UAssetToolNative.csproj"
     if (Test-Path $toolProject) {
         $toolOutput = Join-Path $workspaceRoot "target\uassettool"
         # Clean stale artifacts (e.g. ue4-dds-tools, .pdb) from previous builds
@@ -132,28 +132,26 @@ try {
         }
         New-Item -ItemType Directory -Force -Path $toolOutput | Out-Null
         
+        # Build UAssetToolNative AOT library from submodule
+        Write-Info "Building UAssetToolNative (AOT DLL) from submodule..."
         & dotnet publish $toolProject `
             -c Release `
             -r win-x64 `
-            --self-contained true `
-            -p:PublishSingleFile=true `
-            -p:IncludeNativeLibrariesForSelfExtract=true `
             -p:DebugType=none `
             -p:DebugSymbols=false `
             -o $toolOutput
-        
         if ($LASTEXITCODE -ne 0) {
-            Write-Error-Custom "UAssetTool build failed!"
+            Write-Error-Custom "UAssetTool AOT library build failed!"
             exit 1
         }
         
-        $toolExe = Join-Path $toolOutput "UAssetTool.exe"
-        if (Test-Path $toolExe) {
-            Write-Success "UAssetTool.exe built successfully"
-            Write-Info "Location: $toolExe"
+        $toolDll = Join-Path $toolOutput "UAssetTool.dll"
+        if (Test-Path $toolDll) {
+            Write-Success "UAssetTool.dll built successfully"
+            Write-Info "Location: $toolDll"
         }
         else {
-            Write-Error-Custom "UAssetTool.exe not found after build!"
+            Write-Error-Custom "UAssetTool.dll not found after build!"
             exit 1
         }
         
@@ -214,10 +212,21 @@ try {
         New-Item -ItemType Directory -Force -Path $targetToolDir | Out-Null
     }
     
-    $srcTool = Join-Path $workspaceRoot "target\uassettool\UAssetTool.exe"
+    $srcTool = Join-Path $workspaceRoot "target\uassettool\UAssetTool.dll"
     if (Test-Path $srcTool) {
-        Copy-Item -Path $srcTool -Destination (Join-Path $targetToolDir "UAssetTool.exe") -Force
-        Write-Info "Pre-seeded UAssetTool.exe for rust build"
+        Copy-Item -Path (Join-Path $workspaceRoot "target\uassettool\*") -Destination $targetToolDir -Recurse -Force
+        Write-Info "Pre-seeded UAssetTool binaries for rust build"
+        
+        # Copy DLL and native dependencies to the main profile directory (parent)
+        $parentProfileDir = Join-Path $workspaceRoot "target\$profileDir"
+        $dllSrc = Join-Path $workspaceRoot "target\uassettool\UAssetTool.dll"
+        if (Test-Path $dllSrc) {
+            Copy-Item -Path $dllSrc -Destination $parentProfileDir -Force
+        }
+        $blakeSrc = Join-Path $workspaceRoot "target\uassettool\blake3_dotnet.dll"
+        if (Test-Path $blakeSrc) {
+            Copy-Item -Path $blakeSrc -Destination $parentProfileDir -Force
+        }
     }
     
     # Tell build.rs to skip building UAssetTool
@@ -244,7 +253,7 @@ try {
     
     $profileDir = if ($Configuration -eq "release") { "release" } else { "debug" }
     $exePath = Join-Path $workspaceRoot "target\$profileDir\REPAK-X.exe"
-    $toolPath = Join-Path $workspaceRoot "target\uassettool\UAssetTool.exe"
+    $toolPath = Join-Path $workspaceRoot "target\uassettool\UAssetTool.dll"
     
     Write-Host ""
     Write-Host "Built Artifacts:" -ForegroundColor Cyan

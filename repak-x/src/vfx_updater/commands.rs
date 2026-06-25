@@ -185,13 +185,13 @@ pub fn vfx_cleanup_pipeline() -> Result<(), String> {
 
 #[tauri::command]
 pub fn vfx_get_uasset_tool_path() -> Result<String, String> {
-    // Use the same logic as install_mod for finding UAssetTool
-    use crate::install_mod::install_mod_logic::iotoc::find_uasset_tool;
+    // The tool is now an in-process NativeAOT library (loaded via the uasset_toolkit FFI),
+    // not a child-process exe. Return its resolved on-disk path for the frontend.
+    let lib_path = uasset_toolkit::native_library_path()
+        .map_err(|e| format!("[VFX] Failed to resolve UAssetTool library: {}", e))?;
 
-    let tool_path = find_uasset_tool().map_err(|e| format!("[VFX] {}", e))?;
-
-    vfx_info(&format!("UAssetTool path: {}", tool_path.display()));
-    Ok(tool_path.to_string_lossy().to_string())
+    vfx_info(&format!("UAssetTool library: {}", lib_path));
+    Ok(lib_path)
 }
 
 // ============================================================================

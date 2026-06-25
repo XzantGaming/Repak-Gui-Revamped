@@ -116,12 +116,8 @@ pub async fn detect_asset_class(
     let request = VfxUatRequest {
         action: "detect_class",
         file_path: Some(file_path.to_string()),
-        file_paths: None,
         usmap_path: Some(usmap_path),
-        output_path: None,
-        filter: None,
-        mount_point: None,
-        base_path: None,
+        ..Default::default()
     };
 
     let response = run_vfx_uat_request(tool_path, &request).await?;

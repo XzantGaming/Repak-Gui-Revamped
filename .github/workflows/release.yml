@@ -15,7 +15,7 @@ env:
 
 jobs:
   # ============================================================================
-  # BUILD JOB - Builds for Windows and Linux in parallel
+  # BUILD JOB - Builds the Windows release (Linux dropped for now; AOT-on-Linux is separate)
   # ============================================================================
   build:
     if: >-
@@ -32,12 +32,8 @@ jobs:
             artifact_name: Repak-X-Windows
             artifact_ext: .zip
             sccache_path: C:\Users\runneradmin\.cache\sccache
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            dotnet_rid: linux-x64
-            artifact_name: Repak-X-Linux
-            artifact_ext: .tar.gz
-            sccache_path: /home/runner/.cache/sccache
+          # Linux intentionally dropped for now — AOT on Linux (toolchain, .so naming,
+          # Oodle) is handled separately. Re-add an ubuntu entry when that lands.
     
     runs-on: ${{ matrix.os }}
     
@@ -56,20 +52,6 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
           submodules: recursive
-
-      # ========== Linux Dependencies ==========
-      - name: Install Linux Dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libunrar-dev \
-            unzip \
-            patchelf
 
       # ========== Setup Tools ==========
       - name: Setup Rust
@@ -133,13 +115,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-sccache-
 
-      - name: Fix sccache permissions
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          mkdir -p /home/runner/.cache/sccache/preprocessor
-          sudo chown -R $(id -u):$(id -g) /home/runner/.cache/sccache
-
       - name: Start sccache server
         shell: bash
         run: |
@@ -155,15 +130,16 @@ jobs:
           echo "Version: $VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
-      # ========== Build UAssetTool ==========
-      - name: Build UAssetTool
+      # ========== Build UAssetTool (NativeAOT) ==========
+      - name: Build UAssetTool (NativeAOT)
         shell: bash
         run: |
-          echo "Building UAssetTool for ${{ matrix.dotnet_rid }}..."
-          dotnet publish UAssetToolRivals/src/UAssetTool \
+          echo "Building UAssetTool NativeAOT library for ${{ matrix.dotnet_rid }}..."
+          dotnet publish UAssetToolRivals/src/UAssetTool/UAssetToolNative.csproj \
             -c Release \
             -r ${{ matrix.dotnet_rid }} \
-            --self-contained true \
+            -p:DebugType=none \
+            -p:DebugSymbols=false \
             -o target/uassettool
 
       # ========== Sync Version ==========
@@ -182,6 +158,10 @@ jobs:
 
       - name: Build Rust Application
         shell: bash
+        env:
+          # The NativeAOT UAssetTool library was already published into target/uassettool
+          # above; tell build.rs not to rebuild it (it's bundled from there at package time).
+          SKIP_UASSET_TOOL_BUILD: '1'
         run: |
           cargo build --release --target ${{ matrix.target }} --features custom-protocol
 
@@ -218,46 +198,12 @@ jobs:
           
           echo "ARTIFACT_PATH=$zipPath" >> $env:GITHUB_OUTPUT
 
-      # ========== Package - Linux ==========
-      - name: Package Linux Distribution
-        if: runner.os == 'Linux'
-        id: package_linux
-        shell: bash
-        run: |
-          VERSION="${{ steps.version.outputs.VERSION }}"
-          DIST_DIR="dist"
-          PACKAGE_DIR="$DIST_DIR/Repak-X-v$VERSION-Linux"
-          
-          # Create directories
-          mkdir -p "$PACKAGE_DIR/uassettool"
-          mkdir -p "$PACKAGE_DIR/data"
-          
-          # Copy main executable
-          cp "target/${{ matrix.target }}/release/REPAK-X" "$PACKAGE_DIR/"
-          chmod +x "$PACKAGE_DIR/REPAK-X"
-          
-          # Copy UAssetTool and dependencies
-          cp -r target/uassettool/* "$PACKAGE_DIR/uassettool/"
-          chmod +x "$PACKAGE_DIR/uassettool/UAssetTool" 2>/dev/null || true
-          
-          # Copy data files
-          cp "repak-x/src/data/character_data.json" "$PACKAGE_DIR/data/"
-          
-          # Create tarball
-          TARBALL_PATH="$DIST_DIR/Repak-X-v$VERSION-Linux.tar.gz"
-          tar -czvf "$TARBALL_PATH" -C "$DIST_DIR" "Repak-X-v$VERSION-Linux"
-          
-          TARBALL_SIZE=$(du -h "$TARBALL_PATH" | cut -f1)
-          echo "Linux tarball created: $TARBALL_SIZE"
-          
-          echo "ARTIFACT_PATH=$TARBALL_PATH" >> $GITHUB_OUTPUT
-
       # ========== Upload Artifacts ==========
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}-v${{ steps.version.outputs.VERSION }}
-          path: ${{ runner.os == 'Windows' && steps.package_windows.outputs.ARTIFACT_PATH || steps.package_linux.outputs.ARTIFACT_PATH }}
+          path: ${{ steps.package_windows.outputs.ARTIFACT_PATH }}
           retention-days: 30
 
       - name: Stop sccache and show stats
@@ -285,12 +231,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: Repak-X-Windows-v${{ needs.build.outputs.version }}
-          path: dist/
-
-      - name: Download Linux Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: Repak-X-Linux-v${{ needs.build.outputs.version }}
           path: dist/
 
       - name: List Downloaded Artifacts
@@ -343,7 +283,6 @@ jobs:
           body_path: ${{ steps.changelog.outputs.CHANGELOG_FILE }}
           files: |
             dist/Repak-X-v${{ needs.build.outputs.version }}-Windows.zip
-            dist/Repak-X-v${{ needs.build.outputs.version }}-Linux.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

@@ -141,10 +141,12 @@ pub fn copy_uasset_with_companions(src: &Path, dst_dir: &Path) -> Result<(), Str
 /// Get the UAssetTool executable path (bundled with app)
 /// Uses the same search logic as install_mod to work in both dev and release builds
 pub fn get_uasset_tool_path(_app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    use crate::install_mod::install_mod_logic::iotoc::find_uasset_tool;
+    // The tool now ships as an in-process NativeAOT library loaded via the uasset_toolkit
+    // FFI, not a child-process exe. Resolve the library path for display/logging; the FFI
+    // itself handles the actual load.
+    let lib_path = uasset_toolkit::native_library_path()
+        .map_err(|e| format!("[VFX] Failed to resolve UAssetTool library: {}", e))?;
 
-    let tool_path = find_uasset_tool().map_err(|e| format!("[VFX] {}", e))?;
-
-    super::logging::vfx_info(&format!("UAssetTool path: {}", tool_path.display()));
-    Ok(tool_path)
+    super::logging::vfx_info(&format!("UAssetTool library: {}", lib_path));
+    Ok(PathBuf::from(lib_path))
 }

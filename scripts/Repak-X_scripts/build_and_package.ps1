@@ -284,7 +284,7 @@ See LICENSE for details.
     
     $components = @(
         @{Name = "Main Application"; Path = "REPAK-X.exe" },
-        @{Name = "UAssetTool"; Path = "uassettool\UAssetTool.exe" }
+        @{Name = "UAssetTool"; Path = "uassettool\UAssetTool.dll" }
         # Note: hash_helper.exe is no longer needed - CityHash64 is now implemented natively in UAssetTool
         # Note: Oodle DLL is downloaded on-demand by the app, not bundled
     )

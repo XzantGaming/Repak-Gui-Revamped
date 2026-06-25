@@ -4,24 +4,14 @@
 //! existing uasset_toolkit. It provides async functions for VFX pipeline operations.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::fs;
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::sync::OnceLock;
-use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
 
 use super::logging::{vfx_debug, vfx_error, vfx_info, vfx_warn};
 use super::models::VfxPipelineProgress;
 use super::progress::VfxProgressSink;
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Default)]
 pub struct VfxUatRequest<'a> {
     pub action: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -32,13 +22,27 @@ pub struct VfxUatRequest<'a> {
     pub usmap_path: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub filter: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mount_point: Option<String>,
     /// Base path for preserving relative directory structure in batch output
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_path: Option<String>,
+
+    // --- Container-op fields (extract_iostore_legacy / create_mod_iostore). The C#
+    //     tool reads each from these exact JSON keys via its `ProcessRequest` dispatch. ---
+    /// Game `Paks` directory, for `extract_iostore_legacy`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub game_paks: Option<String>,
+    /// Mod `.utoc`/directory to overlay, for `extract_iostore_legacy`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mod_path: Option<String>,
+    /// Asset path filters, for `extract_iostore_legacy`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter_patterns: Option<Vec<String>>,
+    /// Input asset directory, for `create_mod_iostore`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_dir: Option<String>,
+    /// Enable Oodle compression, for `create_mod_iostore` (default-on in the legacy CLI).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compress: Option<bool>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -48,224 +52,62 @@ pub struct VfxUatResponse {
     pub data: Option<serde_json::Value>,
 }
 
-struct VfxUatSession {
-    child: Child,
-    stdin: ChildStdin,
-    stdout_lines: tokio::io::Lines<BufReader<ChildStdout>>,
-    stderr_task: JoinHandle<()>,
-}
+// The VFX pipeline used to drive an isolated child `UAssetTool.exe` over a stdin/stdout
+// JSON line protocol. The tool now ships as an in-process NativeAOT library, so requests
+// go through the shared `uasset_toolkit` FFI (`invoke_json`). The JSON request/response
+// envelope is unchanged — only the transport differs (no child process, no exe on disk).
 
-impl VfxUatSession {
-    async fn start(tool_path: &Path) -> Result<Self, String> {
-        vfx_info(&format!(
-            "Starting isolated UAssetTool session: {}",
-            tool_path.display()
-        ));
-
-        let mut cmd = Command::new(tool_path);
-        cmd.stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        // Hide console window on Windows release builds
-        #[cfg(windows)]
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| format!("[VFX] Failed to start UAssetTool: {}", e))?;
-
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| "[VFX] Failed to open stdin for UAssetTool".to_string())?;
-
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| "[VFX] Failed to open stdout for UAssetTool".to_string())?;
-
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| "[VFX] Failed to open stderr for UAssetTool".to_string())?;
-
-        let mut stderr_lines = BufReader::new(stderr).lines();
-        let stderr_task = tokio::spawn(async move {
-            loop {
-                match stderr_lines.next_line().await {
-                    Ok(Some(line)) => {
-                        if !line.trim().is_empty() {
-                            vfx_debug(&format!("UAT[stderr] {}", line));
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(e) => {
-                        vfx_error(&format!("UAT[stderr] read error: {}", e));
-                        break;
-                    }
-                }
-            }
-        });
-
-        Ok(Self {
-            child,
-            stdin,
-            stdout_lines: BufReader::new(stdout).lines(),
-            stderr_task,
-        })
-    }
-
-    async fn send_request(
-        &mut self,
-        request: &VfxUatRequest<'_>,
-    ) -> Result<VfxUatResponse, String> {
-        let request_json = serde_json::to_string(request)
-            .map_err(|e| format!("[VFX] Failed to serialize request: {}", e))?;
-
-        vfx_debug(&format!("UAT request: {}", request_json));
-
-        self.stdin
-            .write_all(request_json.as_bytes())
-            .await
-            .map_err(|e| format!("[VFX] Failed to write to UAT stdin: {}", e))?;
-        self.stdin
-            .write_all(b"\n")
-            .await
-            .map_err(|e| format!("[VFX] Failed to finalize request line: {}", e))?;
-        self.stdin
-            .flush()
-            .await
-            .map_err(|e| format!("[VFX] Failed to flush UAT stdin: {}", e))?;
-
-        loop {
-            let line = self
-                .stdout_lines
-                .next_line()
-                .await
-                .map_err(|e| format!("[VFX] Failed to read UAT response: {}", e))?;
-
-            let Some(line) = line else {
-                return Err("[VFX] UAT stdout closed unexpectedly".to_string());
-            };
-
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-
-            match serde_json::from_str::<VfxUatResponse>(trimmed) {
-                Ok(response) => {
-                    vfx_debug(&format!(
-                        "UAT response: success={}, message={}",
-                        response.success, response.message
-                    ));
-                    if let Some(data) = &response.data {
-                        vfx_debug(&format!("UAT response data: {}", data));
-                    }
-                    return Ok(response);
-                }
-                Err(e) => {
-                    vfx_debug(&format!("UAT stdout non-JSON line ({}): {}", e, trimmed));
-                }
-            }
-        }
-    }
-
-    async fn shutdown(&mut self) {
-        vfx_info("Shutting down UAT session");
-
-        if let Err(e) = self.stdin.shutdown().await {
-            vfx_error(&format!("Failed to close UAT stdin: {}", e));
-        }
-
-        match self.child.try_wait() {
-            Ok(Some(status)) => {
-                vfx_info(&format!("UAT already exited with status: {}", status));
-            }
-            Ok(None) => {
-                if let Err(e) = self.child.kill().await {
-                    vfx_error(&format!("Failed to kill UAT process: {}", e));
-                }
-                if let Err(e) = self.child.wait().await {
-                    vfx_error(&format!("Failed waiting for killed UAT process: {}", e));
-                }
-            }
-            Err(e) => {
-                vfx_error(&format!("Failed to query UAT process status: {}", e));
-            }
-        }
-
-        self.stderr_task.abort();
-    }
-}
-
-fn vfx_session_store() -> &'static Mutex<Option<VfxUatSession>> {
-    static SESSION: OnceLock<Mutex<Option<VfxUatSession>>> = OnceLock::new();
-    SESSION.get_or_init(|| Mutex::new(None))
-}
-
-pub async fn ensure_vfx_uat_session(tool_path: &Path) -> Result<(), String> {
-    let store = vfx_session_store();
-    let mut guard = store.lock().await;
-    if guard.is_some() {
-        vfx_debug("UAT session already active");
-        return Ok(());
-    }
-
-    let session = VfxUatSession::start(tool_path).await?;
-    *guard = Some(session);
-    vfx_info("UAT session started successfully");
+/// Ensure the in-process UAssetTool library is loaded. Cheap and idempotent: the global
+/// toolkit is initialized once and kept for the process lifetime. The `_tool_path`
+/// argument is retained for call-site compatibility but is unused — the native library
+/// resolves itself next to the executable.
+pub async fn ensure_vfx_uat_session(_tool_path: &Path) -> Result<(), String> {
+    tokio::task::spawn_blocking(uasset_toolkit::init_global_toolkit)
+        .await
+        .map_err(|e| format!("[VFX] UAT init task failed: {}", e))?
+        .map_err(|e| format!("[VFX] Failed to load UAssetTool library: {}", e))?;
+    vfx_debug("UAT in-process library ready");
     Ok(())
 }
 
+/// No-op retained for API symmetry with the old child-process session. There is no
+/// process to tear down — the in-process library lives for the process lifetime.
 pub async fn close_vfx_uat_session() {
-    let store = vfx_session_store();
-    let mut guard = store.lock().await;
-    if let Some(mut session) = guard.take() {
-        session.shutdown().await;
-        vfx_info("UAT session closed");
-    } else {
-        vfx_debug("UAT session was not active");
-    }
+    vfx_debug("UAT session close requested (in-process library; nothing to tear down)");
 }
 
+/// Send one JSON request through the in-process UAssetTool FFI and parse the response.
+/// The native call is synchronous, so it runs on a blocking thread to avoid stalling the
+/// async runtime. The `_tool_path` argument is retained for call-site compatibility.
 pub async fn run_vfx_uat_request(
-    tool_path: &Path,
+    _tool_path: &Path,
     request: &VfxUatRequest<'_>,
 ) -> Result<VfxUatResponse, String> {
-    ensure_vfx_uat_session(tool_path).await?;
+    let request_json = serde_json::to_string(request)
+        .map_err(|e| format!("[VFX] Failed to serialize request: {}", e))?;
+    vfx_debug(&format!("UAT request: {}", request_json));
 
-    let store = vfx_session_store();
-    let mut guard = store.lock().await;
-    let session = guard
-        .as_mut()
-        .ok_or_else(|| "[VFX] UAT session missing after initialization".to_string())?;
+    let response_json =
+        tokio::task::spawn_blocking(move || uasset_toolkit::invoke_json(&request_json))
+            .await
+            .map_err(|e| format!("[VFX] UAT request task failed: {}", e))?
+            .map_err(|e| format!("[VFX] UAT invoke failed: {}", e))?;
 
-    match session.send_request(request).await {
-        Ok(response) => Ok(response),
-        Err(first_error) => {
-            vfx_warn(&format!(
-                "UAT request failed, restarting session and retrying: {}",
-                first_error
-            ));
+    let response: VfxUatResponse = serde_json::from_str(&response_json).map_err(|e| {
+        format!(
+            "[VFX] Failed to parse UAT response: {} (response: {})",
+            e, response_json
+        )
+    })?;
 
-            if let Some(mut old_session) = guard.take() {
-                old_session.shutdown().await;
-            }
-
-            let mut new_session = VfxUatSession::start(tool_path).await?;
-            let retry = new_session.send_request(request).await;
-            *guard = Some(new_session);
-
-            retry.map_err(|retry_error| {
-                format!(
-                    "[VFX] UAT request failed after restart. First: {}. Retry: {}",
-                    first_error, retry_error
-                )
-            })
-        }
+    vfx_debug(&format!(
+        "UAT response: success={}, message={}",
+        response.success, response.message
+    ));
+    if let Some(data) = &response.data {
+        vfx_debug(&format!("UAT response data: {}", data));
     }
+    Ok(response)
 }
 
 fn find_uassets_recursive(
@@ -351,40 +193,26 @@ pub async fn extract_mod_assets(
         message: "Extracting mod assets from IOStore...".to_string(),
     });
 
-    let mut cmd = Command::new(tool_path);
-    cmd.arg("extract_iostore_legacy")
-        .arg(game_paks)
-        .arg(output_dir)
-        .arg("--mod")
-        .arg(mod_path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    #[cfg(windows)]
-    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-
     vfx_debug(&format!(
         "extract_mod_assets\n  game_paks: {}\n  mod_path: {}\n  output_dir: {}",
         game_paks, mod_path, output_dir
     ));
 
-    let output = cmd
-        .output()
-        .await
-        .map_err(|e| format!("[VFX] Failed to run UAssetTool: {}", e))?;
+    // Mirrors the legacy CLI: `extract_iostore_legacy <game_paks> <output> --mod <mod>`.
+    let request = VfxUatRequest {
+        action: "extract_iostore_legacy",
+        game_paks: Some(game_paks.to_string()),
+        mod_path: Some(mod_path.to_string()),
+        output_path: Some(output_dir.to_string()),
+        ..Default::default()
+    };
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    if !stdout.is_empty() {
-        vfx_debug(&format!("stdout:\n{}", stdout));
-    }
-    if !stderr.is_empty() {
-        vfx_debug(&format!("stderr:\n{}", stderr));
-    }
-
-    if !output.status.success() {
-        return Err(format!("[VFX] Extract mod assets failed: {}", stderr));
+    let response = run_vfx_uat_request(tool_path, &request).await?;
+    if !response.success {
+        return Err(format!(
+            "[VFX] Extract mod assets failed: {}",
+            response.message
+        ));
     }
 
     let mut assets = Vec::new();
@@ -463,13 +291,11 @@ pub async fn convert_uassets_to_json(
     // Single request with all files - base_path preserves directory structure
     let request = VfxUatRequest {
         action: "batch_to_json",
-        file_path: None,
         file_paths: Some(file_paths.clone()),
         usmap_path: Some(usmap_path),
         output_path: Some(output_dir.to_string()),
-        filter: None,
-        mount_point: None,
         base_path: Some(input_dir.to_string()), // Preserves relative structure
+        ..Default::default()
     };
 
     let mut converted_files = Vec::new();
@@ -569,13 +395,11 @@ pub async fn convert_json_to_uassets(
     // Single request with all files - base_path preserves directory structure
     let request = VfxUatRequest {
         action: "batch_from_json",
-        file_path: None,
         file_paths: Some(file_paths.clone()),
         usmap_path: Some(usmap_path),
         output_path: Some(output_dir.to_string()),
-        filter: None,
-        mount_point: None,
         base_path: Some(input_dir.to_string()), // Preserves relative structure
+        ..Default::default()
     };
 
     match run_vfx_uat_request(tool_path, &request).await {
@@ -649,39 +473,11 @@ pub async fn extract_vanilla_assets(
         })
         .collect();
 
-    let filters_file_name = format!(
-        "rvfx_extract_filters_{}.txt",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| e.to_string())?
-            .as_millis()
-    );
-    let filters_file_path = std::env::temp_dir().join(filters_file_name);
-    let filters_file_contents = normalized_patterns.join("\n");
-
-    fs::write(&filters_file_path, filters_file_contents).map_err(|e| {
-        format!(
-            "[VFX] Failed to write filter file {}: {}",
-            filters_file_path.display(),
-            e
-        )
-    })?;
-
-    let mut cmd = Command::new(tool_path);
-    cmd.arg("extract_iostore_legacy")
-        .arg(game_paks)
-        .arg(output_dir)
-        .arg("--filter")
-        .arg(&filters_file_path);
-
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-
-    #[cfg(windows)]
-    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-
     vfx_debug(&format!(
-        "extract_vanilla_assets\n  game_paks: {}\n  output_dir: {}\n  filters_file: {}\n  filter_patterns ({}):",
-        game_paks, output_dir, filters_file_path.display(), filter_patterns.len()
+        "extract_vanilla_assets\n  game_paks: {}\n  output_dir: {}\n  filter_patterns ({}):",
+        game_paks,
+        output_dir,
+        normalized_patterns.len()
     ));
     for (i, p) in normalized_patterns.iter().enumerate().take(20) {
         vfx_debug(&format!("    [{}] {}", i, p));
@@ -693,31 +489,23 @@ pub async fn extract_vanilla_assets(
         ));
     }
 
-    let output = cmd
-        .output()
-        .await
-        .map_err(|e| format!("[VFX] Failed to run UAssetTool: {}", e))?;
+    // Mirrors the legacy CLI `extract_iostore_legacy <game_paks> <output> --filter ...`,
+    // passing the patterns inline (the JSON handler takes a `filter_patterns` list, so the
+    // old temp-filter-file round-trip is no longer needed).
+    let request = VfxUatRequest {
+        action: "extract_iostore_legacy",
+        game_paks: Some(game_paks.to_string()),
+        output_path: Some(output_dir.to_string()),
+        filter_patterns: Some(normalized_patterns.clone()),
+        ..Default::default()
+    };
 
-    if let Err(e) = fs::remove_file(&filters_file_path) {
-        vfx_warn(&format!(
-            "Failed to remove filters file {}: {}",
-            filters_file_path.display(),
-            e
+    let response = run_vfx_uat_request(tool_path, &request).await?;
+    if !response.success {
+        return Err(format!(
+            "[VFX] Vanilla extraction failed: {}",
+            response.message
         ));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    if !stdout.is_empty() {
-        vfx_debug(&format!("stdout:\n{}", stdout));
-    }
-    if !stderr.is_empty() {
-        vfx_debug(&format!("stderr:\n{}", stderr));
-    }
-
-    if !output.status.success() {
-        return Err(format!("[VFX] Vanilla extraction failed: {}", stderr));
     }
 
     let mut assets = Vec::new();
@@ -764,18 +552,6 @@ pub async fn pack_to_iostore(
         return Err("[VFX] No .uasset files found in input directory".to_string());
     }
 
-    let mut cmd = Command::new(tool_path);
-    cmd.arg("create_mod_iostore")
-        .arg(&output_base)
-        .arg(input_dir)
-        .arg("--usmap")
-        .arg(usmap_path);
-
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-
-    #[cfg(windows)]
-    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-
     vfx_debug(&format!(
         "pack_to_iostore\n  input_dir: {}\n  output_base: {}\n  usmap: {}\n  uasset_files: {}",
         input_dir,
@@ -792,23 +568,23 @@ pub async fn pack_to_iostore(
         message: format!("Packing {} assets...", uasset_files.len()),
     });
 
-    let output = cmd
-        .output()
-        .await
-        .map_err(|e| format!("[VFX] Failed to run UAssetTool: {}", e))?;
+    // Mirrors the legacy CLI `create_mod_iostore <output_base> <input_dir>` (compression
+    // on by default). The CLI's `--usmap` flag was a no-op for packing (it matched no
+    // option and was ignored), and the JSON handler takes no usmap, so it is dropped here.
+    let request = VfxUatRequest {
+        action: "create_mod_iostore",
+        output_path: Some(output_base.clone()),
+        input_dir: Some(input_dir.to_string()),
+        compress: Some(true),
+        ..Default::default()
+    };
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    if !stdout.is_empty() {
-        vfx_debug(&format!("stdout:\n{}", stdout));
-    }
-    if !stderr.is_empty() {
-        vfx_debug(&format!("stderr:\n{}", stderr));
-    }
-
-    if !output.status.success() {
-        return Err(format!("[VFX] create_mod_iostore failed: {}", stderr));
+    let response = run_vfx_uat_request(tool_path, &request).await?;
+    if !response.success {
+        return Err(format!(
+            "[VFX] create_mod_iostore failed: {}",
+            response.message
+        ));
     }
 
     progress.emit(VfxPipelineProgress {
@@ -855,13 +631,9 @@ pub async fn get_asset_classes(
     for (batch_idx, batch) in batches.iter().enumerate() {
         let request = VfxUatRequest {
             action: "get_class",
-            file_path: None,
             file_paths: Some(batch.to_vec()),
             usmap_path: Some(usmap_path),
-            output_path: None,
-            filter: None,
-            mount_point: None,
-            base_path: None,
+            ..Default::default()
         };
 
         if batch_idx % 5 == 0 || batch_idx == batches.len() - 1 {
@@ -977,13 +749,9 @@ pub async fn batch_detect_asset_types(
     for (batch_idx, batch) in batches.iter().enumerate() {
         let request = VfxUatRequest {
             action: "detect_type",
-            file_path: None,
             file_paths: Some(batch.to_vec()),
             usmap_path: Some(usmap_path),
-            output_path: None,
-            filter: None,
-            mount_point: None,
-            base_path: None,
+            ..Default::default()
         };
 
         vfx_debug(&format!(
