@@ -188,7 +188,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: -3px 0; /* Offset increased height so it doesn't push layout too much */
+  margin: -3px 0;
+  /* Offset increased height so it doesn't push layout too much */
 }
 
 /* The actual line (with gap in the middle) */
@@ -212,7 +213,7 @@ body {
   border-radius: 4px;
   z-index: 1;
   transition: all 0.2s ease;
-  background-image: 
+  background-image:
     linear-gradient(90deg, var(--text-muted) 1px, transparent 1px),
     linear-gradient(90deg, var(--text-muted) 1px, transparent 1px),
     linear-gradient(90deg, var(--text-muted) 1px, transparent 1px);
@@ -229,7 +230,7 @@ body {
 .vertical-resizer:hover::after,
 .vertical-resizer.resizing::after {
   border-color: var(--accent-primary);
-  background-image: 
+  background-image:
     linear-gradient(90deg, var(--accent-primary) 1px, transparent 1px),
     linear-gradient(90deg, var(--accent-primary) 1px, transparent 1px),
     linear-gradient(90deg, var(--accent-primary) 1px, transparent 1px);
@@ -310,6 +311,11 @@ body {
   overflow: hidden;
 }
 
+.mod-details-and-contents.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
 .mod-details-wrapper {
   flex: 1;
   min-width: 200px;
@@ -340,18 +346,72 @@ body {
 
 
 .resize-handle {
-  width: 4px;
-  background: var(--panel-border);
+  width: 10px;
+  background: transparent;
   cursor: col-resize;
   position: absolute;
   top: 0;
   bottom: 0;
   left: 60%;
   z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 -3px;
 }
 
-.resize-handle:hover {
-  background: var(--accent-primary);
+/* The line (with gap in the middle) */
+.resize-handle::before {
+  content: "";
+  position: absolute;
+  height: 100%;
+  width: 2px;
+  left: 25%;
+  background: linear-gradient(180deg,
+      var(--panel-border) calc(50% - 18px),
+      transparent calc(50% - 18px),
+      transparent calc(50% + 18px),
+      var(--panel-border) calc(50% + 18px));
+  transition: all 0.2s ease;
+}
+
+/* The grip knob */
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 35%;
+  transform: translate(-50%, -50%);
+  height: 36px;
+  width: 6px;
+  background-color: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  z-index: 1;
+  transition: all 0.2s ease;
+  background-image:
+    linear-gradient(180deg, var(--text-muted) 1px, transparent 1px),
+    linear-gradient(180deg, var(--text-muted) 1px, transparent 1px),
+    linear-gradient(180deg, var(--text-muted) 1px, transparent 1px);
+  background-position: top 10px center, center, bottom 10px center;
+  background-size: 4px 1px;
+  background-repeat: no-repeat;
+}
+
+.resize-handle:hover::before {
+  background: linear-gradient(180deg,
+      var(--accent-primary) calc(50% - 18px),
+      transparent calc(50% - 18px),
+      transparent calc(50% + 18px),
+      var(--accent-primary) calc(50% + 18px));
+}
+
+.resize-handle:hover::after {
+  border-color: var(--accent-primary);
+  background-image:
+    linear-gradient(180deg, var(--accent-primary) 1px, transparent 1px),
+    linear-gradient(180deg, var(--accent-primary) 1px, transparent 1px),
+    linear-gradient(180deg, var(--accent-primary) 1px, transparent 1px);
 }
 
 .content-wrapper {
@@ -361,7 +421,10 @@ body {
 }
 
 .right-panel {
-  border: 1px solid var(--panel-border);
+  border-top: 1px solid var(--panel-border);
+  border-right: 1px solid var(--panel-border);
+  border-bottom: 1px solid var(--panel-border);
+  border-left: none;
   border-radius: 8px;
   background: var(--panel-bg);
   display: flex;
