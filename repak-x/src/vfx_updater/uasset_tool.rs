@@ -411,8 +411,29 @@ pub async fn convert_json_to_uassets(
                     file_paths.len()
                 ));
             } else {
+                // The tool reports each file's failure in `data.errors`; log them all and
+                // surface the first few so the real cause is visible (not just "0/N").
+                let sample = response
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.get("errors"))
+                    .and_then(|e| e.as_array())
+                    .map(|arr| {
+                        for e in arr.iter().filter_map(|e| e.as_str()) {
+                            vfx_error(&format!("from_json: {}", e));
+                        }
+                        arr.iter()
+                            .filter_map(|e| e.as_str())
+                            .take(3)
+                            .collect::<Vec<_>>()
+                            .join(" || ")
+                    })
+                    .unwrap_or_default();
                 vfx_error(&format!("Batch from_json failed: {}", response.message));
-                return Err(format!("Batch conversion failed: {}", response.message));
+                return Err(format!(
+                    "Batch conversion failed: {} — first errors: {}",
+                    response.message, sample
+                ));
             }
         }
         Err(e) => {
