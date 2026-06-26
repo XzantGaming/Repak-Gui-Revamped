@@ -228,7 +228,13 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
 
   useEffect(() => {
     console.log('[InstallModPanel] Received mods:', mods.length, mods)
-    setModSettings(buildInitialSettings(mods))
+    setModSettings(prev => {
+      const newSettings = buildInitialSettings(mods)
+      return mods.reduce((acc, _, idx) => {
+        acc[idx] = prev[idx] !== undefined ? prev[idx] : newSettings[idx]
+        return acc
+      }, {} as Record<number, ModSetting>)
+    })
   }, [mods])
 
   useEffect(() => {
@@ -277,6 +283,37 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
       .filter(m => m.enabled !== false)
     onInstall(modsToInstall)
   }
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        const activeEl = document.activeElement as HTMLElement | null
+        const activeTag = activeEl?.tagName?.toLowerCase()
+
+        // Ignore if user is typing in an input (except our custom name input)
+        if (activeTag === 'input' || activeTag === 'textarea') {
+          if (!activeEl?.classList.contains('mod-name-input')) {
+            return
+          }
+        }
+
+        // Ignore if user is focused on a button (except our install button)
+        if (activeTag === 'button') {
+          if (!activeEl?.classList.contains('btn-install')) {
+            return
+          }
+        }
+
+        if (enabledCount > 0) {
+          e.preventDefault()
+          handleInstall()
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [enabledCount, mods, modSettings, onInstall])
 
   const handleNewFolder = (targetModIdx: number) => {
     if (onNewFolder) {
@@ -372,7 +409,7 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
                           {category}
                         </span>
                         {additional.map(tag => (
-                          <span key={tag} className={`additional-badge ${tag.toLowerCase()}-badge`}>
+                          <span key={tag} className={`additional-badge ${tag.toLowerCase().replace(/\s+/g, '-')}-badge`}>
                             {tag}
                           </span>
                         ))}

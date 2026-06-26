@@ -6,6 +6,7 @@
   border-radius: 4px;
   font-weight: 600;
   font-size: 0.85rem;
+  border: 1px solid transparent;
 }
 
 .character-badge {
@@ -41,9 +42,9 @@
 }
 
 .static-mesh-badge {
-  background: rgba(6, 182, 212, 0.15);
-  color: #22d3ee;
-  border-color: rgba(6, 182, 212, 0.35);
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.35);
 }
 
 .vfx-badge {
@@ -95,17 +96,23 @@
   border-color: rgba(20, 184, 166, 0.35);
 }
 
+.unknown-badge {
+  background: rgba(160, 160, 160, 0.15);
+  color: #d4d4d8;
+  border-color: rgba(160, 160, 160, 0.35);
+}
+
 /* Additional category badges */
 .blueprint-badge {
   background: #9b59b620;
   color: #c084fc;
-  border: 1px solid rgba(192, 132, 252, 0.35);
+  border-color: rgba(192, 132, 252, 0.35);
 }
 
 .text-badge {
   background: #fbbf2420;
   color: #fbbf24;
-  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-color: rgba(251, 191, 36, 0.35);
 }
 
 /* No UAssets badge - grey/neutral */
@@ -142,11 +149,16 @@
   border-color: rgba(37, 99, 235, 0.4);
 }
 
-[data-theme="light"] .mesh-badge,
-[data-theme="light"] .static-mesh-badge {
+[data-theme="light"] .mesh-badge {
   background: rgba(6, 182, 212, 0.2);
   color: #0891b2;
   border-color: rgba(8, 145, 178, 0.45);
+}
+
+[data-theme="light"] .static-mesh-badge {
+  background: rgba(56, 189, 248, 0.2);
+  color: #0284c7;
+  border-color: rgba(2, 132, 199, 0.45);
 }
 
 [data-theme="light"] .vfx-badge {
@@ -220,6 +232,12 @@
   background: rgba(192, 38, 211, 0.18);
   color: #a21caf;
   border-color: rgba(162, 28, 175, 0.4);
+}
+
+[data-theme="light"] .unknown-badge {
+  background: rgba(120, 120, 130, 0.15);
+  color: #52525b;
+  border-color: rgba(120, 120, 130, 0.35);
 }
 
 [data-theme="light"] .character-badge {

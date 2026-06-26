@@ -4746,6 +4746,81 @@ async fn get_skip_launcher_status(state: State<'_, Arc<Mutex<AppState>>>) -> Res
 }
 
 // ============================================================================
+// SIG BYPASSER TOGGLE
+// ============================================================================
+
+/// Check the status of the Sig Bypasser
+/// Returns: "Enabled", "Disabled", or "NotInstalled"
+#[tauri::command]
+async fn get_sig_bypasser_status(state: State<'_, Arc<Mutex<AppState>>>) -> Result<String, String> {
+    let mods_path = {
+        let state = state.lock().unwrap();
+        state.game_path.clone()
+    };
+
+    let binaries_path = mods_path
+        .parent() // Paks
+        .and_then(|p| p.parent()) // Content
+        .and_then(|p| p.parent()) // Marvel
+        .map(|p| p.join("Binaries").join("Win64"))
+        .ok_or_else(|| "Could not determine Binaries directory".to_string())?;
+
+    let dsound_path = binaries_path.join("dsound.dll");
+    let dsound_disabled_path = binaries_path.join("dsound.dll.disabled");
+
+    if dsound_path.exists() {
+        Ok("Enabled".to_string())
+    } else if dsound_disabled_path.exists() {
+        Ok("Disabled".to_string())
+    } else {
+        Ok("NotInstalled".to_string())
+    }
+}
+
+/// Toggle the Sig Bypasser
+/// Returns the new status: "Enabled", "Disabled", or "NotInstalled"
+#[tauri::command]
+async fn toggle_sig_bypasser(state: State<'_, Arc<Mutex<AppState>>>) -> Result<String, String> {
+    let mods_path = {
+        let state = state.lock().unwrap();
+        state.game_path.clone()
+    };
+
+    let binaries_path = mods_path
+        .parent() // Paks
+        .and_then(|p| p.parent()) // Content
+        .and_then(|p| p.parent()) // Marvel
+        .map(|p| p.join("Binaries").join("Win64"))
+        .ok_or_else(|| "Could not determine Binaries directory".to_string())?;
+
+    let dsound_path = binaries_path.join("dsound.dll");
+    let dsound_disabled_path = binaries_path.join("dsound.dll.disabled");
+
+    if dsound_path.exists() {
+        // Currently enabled, disable it
+        match std::fs::rename(&dsound_path, &dsound_disabled_path) {
+            Ok(_) => {
+                info!("Disabled Sig Bypasser (renamed to dsound.dll.disabled)");
+                Ok("Disabled".to_string())
+            }
+            Err(e) => Err(format!("Failed to disable Sig Bypasser: {}", e)),
+        }
+    } else if dsound_disabled_path.exists() {
+        // Currently disabled, enable it
+        match std::fs::rename(&dsound_disabled_path, &dsound_path) {
+            Ok(_) => {
+                info!("Enabled Sig Bypasser (renamed back to dsound.dll)");
+                Ok("Enabled".to_string())
+            }
+            Err(e) => Err(format!("Failed to enable Sig Bypasser: {}", e)),
+        }
+    } else {
+        // Not installed
+        Err("Sig Bypasser (dsound.dll) is not installed in the Binaries directory.".to_string())
+    }
+}
+
+// ============================================================================
 // BUNDLED LOD DISABLER MOD
 // ============================================================================
 
@@ -7544,6 +7619,8 @@ fn main() {
             launch_game,
             skip_launcher_patch,
             get_skip_launcher_status,
+            get_sig_bypasser_status,
+            toggle_sig_bypasser,
             recompress_mods,
             get_app_version,
             check_for_updates,

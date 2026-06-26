@@ -219,7 +219,7 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose, characte
                 {additionalBadges.map(cat => (
                   <div
                     key={cat}
-                    className={`additional-badge ${cat.toLowerCase()}-badge`}
+                    className={`additional-badge ${cat.toLowerCase().replace(/\s+/g, '-')}-badge`}
                     title={`Contains ${cat}`}
                   >
                     {cat}
@@ -276,7 +276,7 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose, characte
                 )}
                 {/* No UAssets badge - show if mod has no .uasset files (but not for IoStore bundles) */}
                 {!details.is_iostore && details.files && details.files.length > 0 && !details.files.some(f => f.toLowerCase().endsWith('.uasset')) && (
-                  <div className="no-uassets-badge" title="This mod contains no UAsset files" style={{ padding: '0.4rem 0.75rem', display: 'inline-block' }}>No UAssets</div>
+                  <div className="no-uassets-badge" title="This mod contains no UAsset files" style={{ padding: '0.4rem 0.75rem', display: 'inline-block' }}>Raw Assets</div>
                 )}
               </div>
               <div className="detail-item">

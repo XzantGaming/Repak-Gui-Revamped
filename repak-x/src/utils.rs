@@ -334,8 +334,26 @@ pub fn get_pak_characteristics_detailed(mod_contents: Vec<String>) -> ModCharact
         String::new()
     };
 
-    // Build additional categories list (Blueprint and Text are additive)
+    // Build additional categories list (Additive types)
     let mut additional_categories = Vec::new();
+    if has_skeletal_mesh && category != "Mesh" {
+        additional_categories.push("Mesh".to_string());
+    }
+    if has_static_mesh && category != "Static Mesh" {
+        additional_categories.push("Static Mesh".to_string());
+    }
+    if has_texture && category != "Texture" {
+        additional_categories.push("Texture".to_string());
+    }
+    if has_material && category != "VFX" {
+        additional_categories.push("VFX".to_string());
+    }
+    if has_audio && category != "Audio" {
+        additional_categories.push("Audio".to_string());
+    }
+    if has_ui && category != "UI" {
+        additional_categories.push("UI".to_string());
+    }
     if has_blueprint && category != "Blueprint" {
         additional_categories.push("Blueprint".to_string());
     }

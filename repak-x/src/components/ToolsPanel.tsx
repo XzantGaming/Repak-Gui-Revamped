@@ -5,7 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-shell';
 import { IoMdRefresh, IoIosSkipForward } from "react-icons/io";
 import { RiFileZipFill } from "react-icons/ri";
-import { MdAutoFixHigh } from "react-icons/md";
+import { MdRemoveModerator } from "react-icons/md";
 import Switch from './ui/Switch';
 import Progress from './ui/Progress';
 import './SettingsPanel.css'; // Reuse the same styles
@@ -33,6 +33,9 @@ export default function ToolsPanel({ onClose, mods = [], onToggleMod }: ToolsPan
     const [isSkippingLauncher, setIsSkippingLauncher] = useState(false);
     const [skipLauncherStatus, setSkipLauncherStatus] = useState('');
     const [isLauncherPatchEnabled, setIsLauncherPatchEnabled] = useState(false);
+    const [isTogglingSigBypasser, setIsTogglingSigBypasser] = useState(false);
+    const [sigBypasserStatusMsg, setSigBypasserStatusMsg] = useState('');
+    const [sigBypasserState, setSigBypasserState] = useState<string>('NotInstalled');
     const [isRecompressing, setIsRecompressing] = useState(false);
     const [recompressStatus, setRecompressStatus] = useState('');
     const [recompressResult, setRecompressResult] = useState<any | null>(null);
@@ -84,6 +87,19 @@ export default function ToolsPanel({ onClose, mods = [], onToggleMod }: ToolsPan
         checkStatus();
     }, []);
 
+    // Check Sig Bypasser status on mount
+    useEffect(() => {
+        const checkSigStatus = async () => {
+            try {
+                const status = await invoke('get_sig_bypasser_status') as string;
+                setSigBypasserState(status);
+            } catch (error) {
+                console.error('Failed to check sig bypasser status:', error);
+            }
+        };
+        checkSigStatus();
+    }, []);
+
     // Clear skip launcher status after 5 seconds
     useEffect(() => {
         if (skipLauncherStatus) {
@@ -93,6 +109,16 @@ export default function ToolsPanel({ onClose, mods = [], onToggleMod }: ToolsPan
             return () => clearTimeout(timer);
         }
     }, [skipLauncherStatus]);
+
+    // Clear sig bypasser status msg after 5 seconds
+    useEffect(() => {
+        if (sigBypasserStatusMsg) {
+            const timer = setTimeout(() => {
+                setSigBypasserStatusMsg('');
+            }, 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [sigBypasserStatusMsg]);
 
     // Clear char update status after 5 seconds
     useEffect(() => {
@@ -132,7 +158,7 @@ export default function ToolsPanel({ onClose, mods = [], onToggleMod }: ToolsPan
         setCharUpdateStatus('Updating...');
         try {
             const count = await invoke('update_character_data_from_github') as any;
-            setCharUpdateStatus(`✓ Successfully updated! ${count} new skins added.`);
+            setCharUpdateStatus(`Successfully updated! ${count} new skins added.`);
         } catch (error) {
             setCharUpdateStatus(`Error: ${error}`);
         } finally {
@@ -149,13 +175,31 @@ export default function ToolsPanel({ onClose, mods = [], onToggleMod }: ToolsPan
             setIsLauncherPatchEnabled(isEnabled);
             setSkipLauncherStatus(
                 isEnabled
-                    ? '✓ Skip launcher enabled (launch_record = 0)'
-                    : '✓ Skip launcher disabled (launch_record = 6)'
+                    ? 'Skip launcher enabled (launch_record = 0)'
+                    : 'Skip launcher disabled (launch_record = 6)'
             );
         } catch (error) {
             setSkipLauncherStatus(`Error: ${error}`);
         } finally {
             setIsSkippingLauncher(false);
+        }
+    };
+
+    const handleToggleSigBypasser = async () => {
+        setIsTogglingSigBypasser(true);
+        setSigBypasserStatusMsg('');
+        try {
+            const newStatus = await invoke('toggle_sig_bypasser') as string;
+            setSigBypasserState(newStatus);
+            setSigBypasserStatusMsg(
+                newStatus === 'Enabled'
+                    ? 'Sig Bypasser enabled'
+                    : 'Sig Bypasser disabled'
+            );
+        } catch (error) {
+            setSigBypasserStatusMsg(`Error: ${error}`);
+        } finally {
+            setIsTogglingSigBypasser(false);
         }
     };
 
@@ -167,9 +211,9 @@ export default function ToolsPanel({ onClose, mods = [], onToggleMod }: ToolsPan
             const result = await invoke('recompress_mods') as any;
             setRecompressResult(result);
             if (result.recompressed > 0) {
-                setRecompressStatus(`✓ Recompressed ${result.recompressed} mod(s)! (${result.already_oodle} already compressed)`);
+                setRecompressStatus(`Recompressed ${result.recompressed} mod(s)! (${result.already_oodle} already compressed)`);
             } else if (result.already_oodle === result.total_scanned) {
-                setRecompressStatus('✓ All mods already use Oodle compression');
+                setRecompressStatus('All mods already use Oodle compression');
             } else if (result.total_scanned === 0) {
                 setRecompressStatus('No mods found to scan');
             } else {
@@ -200,6 +244,56 @@ export default function ToolsPanel({ onClose, mods = [], onToggleMod }: ToolsPan
 
                     <div className="modal-body">
                         <div className="setting-section">
+                            <h3>Sig Bypasser</h3>
+                            <div className="setting-group">
+                                <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>
+                                    Enables or disables the signature checks bypass.
+                                </p>
+                                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                                    <button
+                                        onClick={handleToggleSigBypasser}
+                                        disabled={isTogglingSigBypasser || sigBypasserState === 'NotInstalled'}
+                                        style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '6px',
+                                            opacity: (isTogglingSigBypasser || sigBypasserState === 'NotInstalled') ? 0.5 : 1,
+                                            cursor: (isTogglingSigBypasser || sigBypasserState === 'NotInstalled') ? 'not-allowed' : 'pointer'
+                                        }}
+                                    >
+                                        <MdRemoveModerator size={16} />
+                                        {isTogglingSigBypasser ? 'Applying...' : 'Toggle Sig Bypasser'}
+                                    </button>
+                                    <span style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.4rem',
+                                        fontSize: '0.85rem',
+                                        fontWeight: 600,
+                                        color: sigBypasserState === 'Enabled' ? '#4CAF50' : (sigBypasserState === 'Disabled' ? '#ff5252' : '#9e9e9e')
+                                    }}>
+                                        <span style={{
+                                            width: '8px',
+                                            height: '8px',
+                                            borderRadius: '50%',
+                                            backgroundColor: sigBypasserState === 'Enabled' ? '#4CAF50' : (sigBypasserState === 'Disabled' ? '#ff5252' : '#9e9e9e')
+                                        }}></span>
+                                        {sigBypasserState === 'Enabled' ? 'Enabled' : (sigBypasserState === 'Disabled' ? 'Disabled' : 'Not Installed')}
+                                    </span>
+                                </div>
+                                {sigBypasserStatusMsg && (
+                                    <p style={{
+                                        fontSize: '0.85rem',
+                                        marginTop: '0.5rem',
+                                        color: sigBypasserStatusMsg.includes('Error') ? '#ff5252' : '#4CAF50'
+                                    }}>
+                                        {sigBypasserStatusMsg}
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="setting-section">
                             <h3>Skip Launcher Patch</h3>
                             <div className="setting-group">
                                 <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>
@@ -209,7 +303,13 @@ export default function ToolsPanel({ onClose, mods = [], onToggleMod }: ToolsPan
                                     <button
                                         onClick={handleSkipLauncherPatch}
                                         disabled={isSkippingLauncher}
-                                        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                                        style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '6px',
+                                            opacity: isSkippingLauncher ? 0.5 : 1,
+                                            cursor: isSkippingLauncher ? 'not-allowed' : 'pointer'
+                                        }}
                                     >
                                         <IoIosSkipForward size={16} />
                                         {isSkippingLauncher ? 'Applying...' : 'Skip Launcher Patch'}
@@ -353,7 +453,7 @@ export default function ToolsPanel({ onClose, mods = [], onToggleMod }: ToolsPan
                                             </span>
                                         </div>
                                         <p style={{ fontSize: '0.75rem', opacity: 0.5, marginTop: '0.5rem' }}>
-                                            {isBundledMod ? '✓ Built-in mod (auto-deployed)' : `Mod: ${lodModDisplayName}`}
+                                            {isBundledMod ? 'Built-in mod (auto-deployed)' : `Mod: ${lodModDisplayName}`}
                                         </p>
                                     </>
                                 ) : (

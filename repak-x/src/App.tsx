@@ -255,6 +255,11 @@ function App() {
     clash: false,
     shortcuts: false
   });
+  
+  const panelsRef = useRef<PanelState>(panels);
+  useEffect(() => {
+    panelsRef.current = panels;
+  }, [panels]);
 
   // Helper to open/close a specific panel
   const setPanel = (panelName: keyof PanelState, isOpen: boolean) => {
@@ -577,8 +582,12 @@ function App() {
       }
 
       // Normal drop: show install panel
-      setModsToInstall(modsData)
-      setPanel('install', true)
+      if (panelsRef.current.install) {
+        setModsToInstall(prev => [...prev, ...modsData])
+      } else {
+        setModsToInstall(modsData)
+        setPanel('install', true)
+      }
     } catch (error) {
       console.error('Parse error:', error)
       setStatus(`Error parsing dropped items: ${error}`)
@@ -1304,7 +1313,9 @@ function App() {
     // Listen for Tauri drag-enter event (when files first enter the window)
     const unlistenDragEnter = listen('tauri://drag-enter', () => {
       console.log('Tauri drag-enter detected')
-      setIsDragging(true)
+      if (!panelsRef.current.install) {
+        setIsDragging(true)
+      }
     })
 
     // Listen for Tauri drag-leave event (when files leave the window)

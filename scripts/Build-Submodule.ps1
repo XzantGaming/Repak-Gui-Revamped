@@ -4,8 +4,8 @@ $rootPath = Resolve-Path "$PSScriptRoot/.."
 Set-Location $rootPath
 
 # Paths
-$projectPath = Join-Path $rootPath "UAssetToolRivals\src\UAssetTool\UAssetTool.csproj"
-$targetSidecarPath = Join-Path $rootPath "target\uassettool\UAssetTool.exe"
+$projectPath = Join-Path $rootPath "UAssetToolRivals\src\UAssetTool\UAssetToolNative.csproj"
+$targetSidecarPath = Join-Path $rootPath "target\uassettool\UAssetTool.dll"
 $targetDir = Split-Path $targetSidecarPath -Parent
 
 # Validation
@@ -32,9 +32,6 @@ try {
     dotnet publish $projectPath `
         -c Release `
         -r win-x64 `
-        --self-contained true `
-        -p:PublishSingleFile=true `
-        -p:IncludeNativeLibrariesForSelfExtract=true `
         -o "$rootPath\temp_build"
 }
 catch {
@@ -43,15 +40,15 @@ catch {
 }
 
 # Move and Rename
-$builtExe = Join-Path "$rootPath\temp_build" "UAssetTool.exe"
+$builtDll = Join-Path "$rootPath\temp_build" "UAssetTool.dll"
 
-if (Test-Path $builtExe) {
+if (Test-Path $builtDll) {
     if (-not (Test-Path $targetDir)) {
         New-Item -ItemType Directory -Path $targetDir | Out-Null
     }
     
     Write-Host "Copying binary to target/uassettool..." -ForegroundColor Cyan
-    Copy-Item -Path $builtExe -Destination $targetSidecarPath -Force
+    Copy-Item -Path $builtDll -Destination $targetSidecarPath -Force
     
     # Cleanup
     Remove-Item "$rootPath\temp_build" -Recurse -Force
@@ -59,6 +56,6 @@ if (Test-Path $builtExe) {
     Write-Host "SUCCESS! Sidecar updated." -ForegroundColor Green
 }
 else {
-    Write-Error "Build succeeded but could not find output executable at $builtExe"
+    Write-Error "Build succeeded but could not find output library at $builtDll"
     exit 1
 }
