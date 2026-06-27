@@ -261,7 +261,7 @@ fn windows_build() {
 
     let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
     let exe_dir = target_dir.join(&profile);
-    let dest_dir = exe_dir.join("uassettool");
+    let dest_dir = exe_dir.clone();
     let dest_path = dest_dir.join("UAssetTool.dll");
 
     let primary_src = target_dir.join("uassettool").join("UAssetTool.dll");

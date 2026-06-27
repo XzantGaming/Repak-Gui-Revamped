@@ -215,6 +215,7 @@ type AppSettings = {
   holdToDelete: boolean
   showSubfolderMods: boolean
   bypassGameRunningLock: boolean
+  launcherType: 'steam' | 'epic'
 }
 
 function App() {
@@ -232,6 +233,7 @@ function App() {
   const [parallelProcessing, setParallelProcessing] = useState(false);
   const [holdToDelete, setHoldToDelete] = useState(true);
   const [bypassGameRunningLock, setBypassGameRunningLock] = useState(false);
+  const [launcherType, setLauncherType] = useState<'steam' | 'epic'>('steam');
   const [theme, setTheme] = useState('dark');
   const [accentColor, setAccentColor] = useState('#4a9eff');
   const [sortBy, setSortBy] = useState<'name' | 'modified'>('name');
@@ -2728,6 +2730,7 @@ function App() {
     const newHoldToDelete = overrides.holdToDelete !== undefined ? overrides.holdToDelete : holdToDelete;
     const newShowSubfolderMods = overrides.showSubfolderMods !== undefined ? overrides.showSubfolderMods : showSubfolderMods;
     const newBypassGameRunningLock = overrides.bypassGameRunningLock !== undefined ? overrides.bypassGameRunningLock : bypassGameRunningLock;
+    const newLauncherType = overrides.launcherType !== undefined ? overrides.launcherType : launcherType;
 
     // 2. Map newAccentColor from hex to the preset name if it is a hex value
     const accentName = Object.keys(ACCENT_COLORS_MAP).find(key => ACCENT_COLORS_MAP[key] === newAccentColor) || newAccentColor;
@@ -2749,6 +2752,7 @@ function App() {
       holdToDelete: newHoldToDelete,
       showSubfolderMods: newShowSubfolderMods,
       bypassGameRunningLock: newBypassGameRunningLock,
+      launcherType: newLauncherType,
     };
 
     // 4. Save to backend
@@ -2784,6 +2788,7 @@ function App() {
     if (overrides.holdToDelete !== undefined) setHoldToDelete(newHoldToDelete);
     if (overrides.showSubfolderMods !== undefined) setShowSubfolderMods(newShowSubfolderMods);
     if (overrides.bypassGameRunningLock !== undefined) setBypassGameRunningLock(newBypassGameRunningLock);
+    if (overrides.launcherType !== undefined) setLauncherType(newLauncherType);
 
     // 6. Handle side effects (DRP connection, theme, etc.)
     if (newEnableDrp && !enableDrp) {
@@ -2854,8 +2859,8 @@ function App() {
         setHoldToDelete(settings.holdToDelete);
         setShowSubfolderMods(settings.showSubfolderMods);
         setBypassGameRunningLock(settings.bypassGameRunningLock);
-        setBypassGameRunningLock(settings.bypassGameRunningLock);
         setEnableDrp(settings.enableDrp);
+        if (settings.launcherType) setLauncherType(settings.launcherType);
 
         // 5. Run auto update check if enabled
         if (settings.autoCheckUpdates) {
@@ -2938,7 +2943,7 @@ function App() {
 
       {panels.settings && (
         <SettingsPanel
-          settings={{ hideSuffix, autoOpenDetails, showHeroIcons, showHeroBg, showModType, showExperimental, enableDrp, parallelProcessing, autoCheckUpdates, holdToDelete, showSubfolderMods, bypassGameRunningLock }}
+          settings={{ hideSuffix, autoOpenDetails, showHeroIcons, showHeroBg, showModType, showExperimental, enableDrp, parallelProcessing, autoCheckUpdates, holdToDelete, showSubfolderMods, bypassGameRunningLock, launcherType }}
           onSave={handleSaveSettings}
           onClose={() => setPanel('settings', false)}
           theme={theme}

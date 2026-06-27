@@ -14,5 +14,6 @@
 - Added Hybrid label for Hybrid IO Store Mods
 - Added sorting for mods by modified date and name with asc/desc order
 - Added a resize handle for the filters and folders panel
+- Added support for Epic Games launcher and a toggle is added in settings to switch between steam and epic
 - Added Cyclops hero icon
 - Minor UI changes

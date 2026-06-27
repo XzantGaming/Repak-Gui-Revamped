@@ -69,6 +69,6 @@ else {
 }
 
 Write-Host "Initializing and pulling latest commit from branch..." -ForegroundColor Cyan
-git submodule update --init --recursive --remote
+git submodule update --init --recursive
 
 Write-Host "Submodule setup complete!" -ForegroundColor Green

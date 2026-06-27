@@ -177,14 +177,13 @@ jobs:
           
           # Create directories
           New-Item -ItemType Directory -Force -Path $packageDir
-          New-Item -ItemType Directory -Force -Path "$packageDir/uassettool"
           New-Item -ItemType Directory -Force -Path "$packageDir/data"
           
           # Copy main executable
           Copy-Item "target/${{ matrix.target }}/release/REPAK-X.exe" "$packageDir/"
           
           # Copy UAssetTool and dependencies
-          Copy-Item "target/uassettool/*" "$packageDir/uassettool/" -Recurse
+          Copy-Item "target/uassettool/*" "$packageDir/" -Recurse
           
           # Copy data files
           Copy-Item "repak-x/src/data/character_data.json" "$packageDir/data/"

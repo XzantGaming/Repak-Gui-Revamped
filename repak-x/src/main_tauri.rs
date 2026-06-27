@@ -76,6 +76,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_launcher_type() -> String {
+    "steam".to_string()
+}
+
 const ACCENT_PRESETS: &[(&str, &str)] = &[
     ("red", "#be1c1c"),
     ("blue", "#4a9eff"),
@@ -145,6 +149,8 @@ struct AppState {
     bypass_game_running_lock: bool,
     #[serde(default = "default_true")]
     enable_drp: bool,
+    #[serde(default = "default_launcher_type")]
+    launcher_type: String,
 
     custom_tag_catalog: Vec<String>,
     /// Last known crash folder name for detecting crashes from previous sessions
@@ -174,6 +180,7 @@ impl Default for AppState {
             show_subfolder_mods: default_true(),
             bypass_game_running_lock: false,
             enable_drp: default_true(),
+            launcher_type: default_launcher_type(),
             custom_tag_catalog: Vec::new(),
             last_known_crash_folder: None,
             mod_details_cache: std::collections::HashMap::new(),
@@ -259,6 +266,7 @@ struct AppSettings {
     show_subfolder_mods: bool,
     bypass_game_running_lock: bool,
     enable_drp: bool,
+    launcher_type: String,
 }
 
 #[tauri::command]
@@ -291,6 +299,7 @@ async fn get_app_settings(state: State<'_, Arc<Mutex<AppState>>>) -> Result<AppS
         show_subfolder_mods: state.show_subfolder_mods,
         bypass_game_running_lock: state.bypass_game_running_lock,
         enable_drp: state.enable_drp,
+        launcher_type: state.launcher_type.clone(),
     })
 }
 
@@ -319,6 +328,7 @@ async fn save_app_settings(
     state.show_subfolder_mods = settings.show_subfolder_mods;
     state.bypass_game_running_lock = settings.bypass_game_running_lock;
     state.enable_drp = settings.enable_drp;
+    state.launcher_type = settings.launcher_type;
 
     // Apply DRP immediately
     if state.enable_drp {
@@ -611,7 +621,10 @@ async fn get_pak_files(state: State<'_, Arc<Mutex<AppState>>>) -> Result<Vec<Mod
 
             let modified_date = std::fs::metadata(path)
                 .and_then(|m| m.modified())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
+                .and_then(|t| {
+                    t.duration_since(std::time::UNIX_EPOCH)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                })
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
 
@@ -748,7 +761,10 @@ async fn get_pak_files_in_folder(
 
             let modified_date = std::fs::metadata(path)
                 .and_then(|m| m.modified())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
+                .and_then(|t| {
+                    t.duration_since(std::time::UNIX_EPOCH)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                })
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
 
@@ -1857,7 +1873,7 @@ fn copy_iostore_with_compression_check(
 
 fn get_clean_base_name(filename: &str) -> String {
     let mut stem = filename;
-    
+
     loop {
         let prev_stem = stem;
         for ext in &[".pak", ".pak_disabled", ".bak_repak", ".utoc", ".ucas"] {
@@ -1971,7 +1987,6 @@ async fn quick_organize(
             }
         }
     };
-
 
     info!(
         "[QuickOrganize] Copying {} file(s) to '{}'",
@@ -2141,8 +2156,15 @@ async fn quick_organize(
                             }
                         };
 
-                        let file_name_str = entry_path.file_name().unwrap_or_default().to_str().unwrap_or("");
-                        cleanup_conflicting_mods(dest.parent().unwrap_or(&output_dir), file_name_str);
+                        let file_name_str = entry_path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_str()
+                            .unwrap_or("");
+                        cleanup_conflicting_mods(
+                            dest.parent().unwrap_or(&output_dir),
+                            file_name_str,
+                        );
 
                         if let Err(e) = std::fs::copy(entry_path, &dest) {
                             error!(
@@ -2183,7 +2205,11 @@ async fn quick_organize(
                                 }
                             };
 
-                            let file_name_str = entry_path.file_name().unwrap_or_default().to_str().unwrap_or("");
+                            let file_name_str = entry_path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_str()
+                                .unwrap_or("");
                             cleanup_conflicting_mods(&dest_dir, file_name_str);
 
                             match copy_iostore_with_compression_check(
@@ -2295,8 +2321,15 @@ async fn quick_organize(
                             }
                         };
 
-                        let file_name_str = entry_path.file_name().unwrap_or_default().to_str().unwrap_or("");
-                        cleanup_conflicting_mods(dest.parent().unwrap_or(&output_dir), file_name_str);
+                        let file_name_str = entry_path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_str()
+                            .unwrap_or("");
+                        cleanup_conflicting_mods(
+                            dest.parent().unwrap_or(&output_dir),
+                            file_name_str,
+                        );
 
                         if let Err(e) = std::fs::copy(entry_path, &dest) {
                             error!(
@@ -2334,7 +2367,11 @@ async fn quick_organize(
                                     }
                                 };
 
-                            let file_name_str = entry_path.file_name().unwrap_or_default().to_str().unwrap_or("");
+                            let file_name_str = entry_path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_str()
+                                .unwrap_or("");
                             cleanup_conflicting_mods(&dest_dir, file_name_str);
 
                             match copy_iostore_with_compression_check(
@@ -4480,9 +4517,9 @@ async fn launch_game(state: State<'_, Arc<Mutex<AppState>>>) -> Result<(), Strin
     use std::process::Command;
 
     // Get game path (this is the ~mods folder inside Paks)
-    let mods_path = {
+    let (mods_path, launcher_type) = {
         let state = state.lock().unwrap();
-        state.game_path.clone()
+        (state.game_path.clone(), state.launcher_type.clone())
     };
 
     // Go up 5 levels to get the actual game root
@@ -4526,23 +4563,45 @@ async fn launch_game(state: State<'_, Arc<Mutex<AppState>>>) -> Result<(), Strin
     }
     info!("Recreated launch_record with value 0 (skip launcher)");
 
-    // Launch the game via Steam (running with parent admin rights)
+    // Launch the game via selected launcher (running with parent admin rights)
     #[cfg(target_os = "windows")]
     let launch_result = {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-        Command::new("cmd")
-            .arg("/C")
-            .arg("start")
-            .arg("")
-            .arg("steam://run/2767030")
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn()
+        if launcher_type == "epic" {
+            let launcher_exe = game_root.join("MarvelRivals_Launcher.exe");
+            Command::new("cmd")
+                .arg("/C")
+                .arg("start")
+                .arg("")
+                .arg(&launcher_exe)
+                .current_dir(&game_root)
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+        } else {
+            Command::new("cmd")
+                .arg("/C")
+                .arg("start")
+                .arg("")
+                .arg("steam://run/2767030")
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+        }
     };
 
     #[cfg(target_os = "linux")]
-    let launch_result = Command::new("xdg-open").arg("steam://run/2767030").spawn();
+    let launch_result = {
+        if launcher_type == "epic" {
+            let launcher_exe = game_root.join("MarvelRivals_Launcher.exe");
+            Command::new("wine")
+                .arg(&launcher_exe)
+                .current_dir(&game_root)
+                .spawn()
+        } else {
+            Command::new("xdg-open").arg("steam://run/2767030").spawn()
+        }
+    };
 
     // Check launch result
     match launch_result {
@@ -5656,14 +5715,14 @@ if %ERRORLEVEL% NEQ 0 (
 if exist "{app_dir}\uassettool\ue4-dds-tools" rd /s /q "{app_dir}\uassettool\ue4-dds-tools" 2>nul
 del /q "{app_dir}\uassettool\*.pdb" 2>nul
 
-:: AOT migration guard: the AOT layout replaces the self-contained UAssetTool.exe with a
-:: framework-dependent UAssetTool.dll. Remove the old self-contained exe ONLY when the incoming
-:: release ships that exact marker (UAssetTool.dll) AND no longer ships UAssetTool.exe.
+:: Flattening migration guard: the new layout places UAssetTool.dll at the root and removes the
+:: uassettool folder. Remove the old uassettool folder ONLY when the incoming
+:: release ships the exact marker (UAssetTool.dll) at the root AND no longer ships the folder.
 :: Hardcode the marker name -- NEVER match *.dll, because Oodle (oo2core/oodle*) DLLs also live
 :: in this folder and a wildcard would falsely "detect AOT" and delete a still-needed UAssetTool.exe.
-if exist "%EXTRACTED_DIR%\uassettool\UAssetTool.dll" (
-    if not exist "%EXTRACTED_DIR%\uassettool\UAssetTool.exe" (
-        if exist "{app_dir}\uassettool\UAssetTool.exe" del /f /q "{app_dir}\uassettool\UAssetTool.exe" 2>nul
+if exist "%EXTRACTED_DIR%\UAssetTool.dll" (
+    if not exist "%EXTRACTED_DIR%\uassettool" (
+        if exist "{app_dir}\uassettool" rd /s /q "{app_dir}\uassettool" 2>nul
     )
 )
 
@@ -5801,13 +5860,13 @@ echo "Copying new files..."
 cp -rf "$EXTRACTED_DIR"/* "$APP_DIR/"
 chmod +x "$APP_DIR/REPAK-X" 2>/dev/null || chmod +x "$APP_DIR/repak-x" 2>/dev/null || true
 
-# AOT migration guard: the AOT layout replaces the self-contained UAssetTool with a
-# framework-dependent UAssetTool.dll. Remove the old self-contained binary ONLY when the incoming
-# release ships that exact marker (UAssetTool.dll) AND no longer ships the UAssetTool binary.
+# Flattening migration guard: the new layout places UAssetTool.dll at the root and removes the
+# uassettool folder. Remove the old uassettool folder ONLY when the incoming
+# release ships the exact marker (UAssetTool.dll) at the root AND no longer ships the folder.
 # Hardcode the marker name -- NEVER match *.dll, because Oodle DLLs also live in this folder and a
 # wildcard would falsely "detect AOT" and delete a still-needed UAssetTool binary.
-if [ -f "$EXTRACTED_DIR/uassettool/UAssetTool.dll" ] && [ ! -f "$EXTRACTED_DIR/uassettool/UAssetTool" ]; then
-    rm -f "$APP_DIR/uassettool/UAssetTool" 2>/dev/null
+if [ -f "$EXTRACTED_DIR/UAssetTool.dll" ] && [ ! -d "$EXTRACTED_DIR/uassettool" ]; then
+    rm -rf "$APP_DIR/uassettool" 2>/dev/null
 fi
 # Always-wrong locations (never the resolved tool path) -- safe to clean unconditionally
 rm -f "$APP_DIR/UAssetTool" "$APP_DIR/tools/UAssetTool" "$APP_DIR/tools/uassettool/UAssetTool" 2>/dev/null
@@ -5882,13 +5941,13 @@ echo "Copying new files..."
 cp -rf "$EXTRACTED_DIR"/* "$APP_DIR/"
 chmod +x "$APP_DIR/REPAK-X" 2>/dev/null || chmod +x "$APP_DIR/repak-x" 2>/dev/null || true
 
-# AOT migration guard: the AOT layout replaces the self-contained UAssetTool with a
-# framework-dependent UAssetTool.dll. Remove the old self-contained binary ONLY when the incoming
-# release ships that exact marker (UAssetTool.dll) AND no longer ships the UAssetTool binary.
+# Flattening migration guard: the new layout places UAssetTool.dll at the root and removes the
+# uassettool folder. Remove the old uassettool folder ONLY when the incoming
+# release ships the exact marker (UAssetTool.dll) at the root AND no longer ships the folder.
 # Hardcode the marker name -- NEVER match *.dll, because Oodle DLLs also live in this folder and a
 # wildcard would falsely "detect AOT" and delete a still-needed UAssetTool binary.
-if [ -f "$EXTRACTED_DIR/uassettool/UAssetTool.dll" ] && [ ! -f "$EXTRACTED_DIR/uassettool/UAssetTool" ]; then
-    rm -f "$APP_DIR/uassettool/UAssetTool" 2>/dev/null
+if [ -f "$EXTRACTED_DIR/UAssetTool.dll" ] && [ ! -d "$EXTRACTED_DIR/uassettool" ]; then
+    rm -rf "$APP_DIR/uassettool" 2>/dev/null
 fi
 # Always-wrong locations (never the resolved tool path) -- safe to clean unconditionally
 rm -f "$APP_DIR/UAssetTool" "$APP_DIR/tools/UAssetTool" "$APP_DIR/tools/uassettool/UAssetTool" 2>/dev/null
@@ -6566,7 +6625,7 @@ async fn get_mod_details(
             .iter()
             .map(|entry| entry.file_path.clone())
             .collect();
-            
+
         // For Hybrid detection: Check if the .pak file also contains raw assets
         if path.exists() && path.extension().unwrap_or_default() == "pak" {
             if let Ok(listing) = uasset_toolkit::list_pak(
@@ -6574,9 +6633,8 @@ async fn get_mod_details(
                 Some(crate::install_mod::AES_KEY_HEX),
                 None,
             ) {
-                let all_pak_files: Vec<String> = listing.files.iter()
-                    .map(|e| e.path.clone())
-                    .collect();
+                let all_pak_files: Vec<String> =
+                    listing.files.iter().map(|e| e.path.clone()).collect();
 
                 let has_raw_assets = all_pak_files.iter().any(|f| {
                     let lower = f.to_lowercase();
@@ -6587,7 +6645,7 @@ async fn get_mod_details(
                     info!("[Detection] Found legacy PAK alongside IoStore bundle (Hybrid!)");
                     is_hybrid = true;
                 }
-                
+
                 if !all_pak_files.is_empty() {
                     // Always append legacy pak files to the total files list
                     utoc_files.extend(all_pak_files);
@@ -6595,7 +6653,7 @@ async fn get_mod_details(
                 }
             }
         }
-        
+
         utoc_files
     } else {
         let listing = uasset_toolkit::list_pak(

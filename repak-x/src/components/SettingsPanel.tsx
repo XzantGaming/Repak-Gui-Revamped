@@ -6,7 +6,8 @@ import { LuFolderInput } from "react-icons/lu"
 import { RiSparkling2Fill } from "react-icons/ri"
 import { CgPerformance } from "react-icons/cg"
 import { MdRefresh, MdArticle } from "react-icons/md"
-import { FaDiscord } from "react-icons/fa"
+import { FaDiscord, FaSteam } from "react-icons/fa"
+import { SiEpicgames } from "react-icons/si"
 import { RiGraduationCapFill } from "react-icons/ri"
 import { BsKeyboardFill } from "react-icons/bs"
 import DiscordWidget from './DiscordWidget'
@@ -36,6 +37,7 @@ type SettingsPayload = {
   holdToDelete: boolean;
   showSubfolderMods: boolean;
   bypassGameRunningLock: boolean;
+  launcherType: 'steam' | 'epic';
 };
 
 type SettingsPanelProps = {
@@ -73,6 +75,7 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
   const [showSubfolderMods, setShowSubfolderMods] = useState(settings.showSubfolderMods !== false);
   const [bypassGameRunningLock, setBypassGameRunningLock] = useState(settings.bypassGameRunningLock || false);
   const [enableDrp, setEnableDrp] = useState(settings.enableDrp !== false);
+  const [launcherType, setLauncherType] = useState<'steam' | 'epic'>(settings.launcherType || 'steam');
   const [showRatMode, setShowRatMode] = useState(false);
 
   // Easter egg: briefly show "Rat Mode" when switching to light theme
@@ -97,7 +100,8 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
       enableDrp,
       holdToDelete,
       showSubfolderMods,
-      bypassGameRunningLock
+      bypassGameRunningLock,
+      launcherType
     });
     alert.success('Settings Saved', 'Your preferences have been updated.');
     onClose();
@@ -121,6 +125,12 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
   useEffect(() => {
     setBypassGameRunningLock(settings.bypassGameRunningLock || false);
   }, [settings.bypassGameRunningLock]);
+
+  useEffect(() => {
+    if (settings.launcherType) {
+      setLauncherType(settings.launcherType);
+    }
+  }, [settings.launcherType]);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -171,8 +181,9 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
             </div>
           </div>
 
+
           <div className="setting-section">
-            <h3>Updates</h3>
+            <h3>Repak X Updates</h3>
             <div className="setting-group">
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
                 <button
@@ -203,6 +214,30 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
               >
                 <span style={{ paddingLeft: '4px', fontWeight: 'normal', opacity: 0.9 }}>Auto-check for updates on startup</span>
               </Checkbox>
+            </div>
+          </div>
+
+          <div className="setting-section">
+            <h3>Launcher</h3>
+            <div className="setting-group">
+              <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>Select which launcher to use when clicking "Launch Game".</p>
+
+              <div className="segmented-control" style={{ maxWidth: '400px' }}>
+                <button
+                  className={`segment-btn ${launcherType === 'steam' ? 'active' : ''}`}
+                  onClick={() => setLauncherType('steam')}
+                  title="Launch via Steam protocol"
+                >
+                  <FaSteam size={18} /> Steam
+                </button>
+                <button
+                  className={`segment-btn ${launcherType === 'epic' ? 'active' : ''}`}
+                  onClick={() => setLauncherType('epic')}
+                  title="Launch via Epic Games executable"
+                >
+                  <SiEpicgames size={16} /> Epic Games
+                </button>
+              </div>
             </div>
           </div>
 

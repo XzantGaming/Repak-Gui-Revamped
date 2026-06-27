@@ -204,29 +204,18 @@ try {
         $tauriArgs += "--debug"
     }
     
-    # Copy UAssetTool to the target specific directory so build.rs finds it and can skip rebuilding
+    # Pre-seed UAssetTool to the target specific directory so build.rs finds it and can skip rebuilding
     $profileDir = if ($Configuration -eq "release") { "release" } else { "debug" }
-    $targetToolDir = Join-Path $workspaceRoot "target\$profileDir\uassettool"
+    $parentProfileDir = Join-Path $workspaceRoot "target\$profileDir"
     
-    if (-not (Test-Path $targetToolDir)) {
-        New-Item -ItemType Directory -Force -Path $targetToolDir | Out-Null
+    if (-not (Test-Path $parentProfileDir)) {
+        New-Item -ItemType Directory -Force -Path $parentProfileDir | Out-Null
     }
     
     $srcTool = Join-Path $workspaceRoot "target\uassettool\UAssetTool.dll"
     if (Test-Path $srcTool) {
-        Copy-Item -Path (Join-Path $workspaceRoot "target\uassettool\*") -Destination $targetToolDir -Recurse -Force
+        Copy-Item -Path (Join-Path $workspaceRoot "target\uassettool\*") -Destination $parentProfileDir -Recurse -Force
         Write-Info "Pre-seeded UAssetTool binaries for rust build"
-        
-        # Copy DLL and native dependencies to the main profile directory (parent)
-        $parentProfileDir = Join-Path $workspaceRoot "target\$profileDir"
-        $dllSrc = Join-Path $workspaceRoot "target\uassettool\UAssetTool.dll"
-        if (Test-Path $dllSrc) {
-            Copy-Item -Path $dllSrc -Destination $parentProfileDir -Force
-        }
-        $blakeSrc = Join-Path $workspaceRoot "target\uassettool\blake3_dotnet.dll"
-        if (Test-Path $blakeSrc) {
-            Copy-Item -Path $blakeSrc -Destination $parentProfileDir -Force
-        }
     }
     
     # Tell build.rs to skip building UAssetTool

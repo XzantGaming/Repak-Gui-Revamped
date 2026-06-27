@@ -118,12 +118,10 @@ try {
     Write-Info "Copying UAssetTool..."
     $toolDir = Join-Path $workspaceRoot "target\uassettool"
     if (Test-Path $toolDir) {
-        $destToolDir = Join-Path $distDir "uassettool"
-        New-Item -ItemType Directory -Force -Path $destToolDir | Out-Null
-        Copy-Item -Path (Join-Path $toolDir "*") -Destination $destToolDir -Recurse -Force
+        Copy-Item -Path (Join-Path $toolDir "*") -Destination $distDir -Recurse -Force
         # Clean out debug symbols and legacy tools that shouldn't ship
-        Get-ChildItem -Path $destToolDir -Filter "*.pdb" -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
-        $ddsTools = Join-Path $destToolDir "ue4-dds-tools"
+        Get-ChildItem -Path $distDir -Filter "*.pdb" -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
+        $ddsTools = Join-Path $distDir "ue4-dds-tools"
         if (Test-Path $ddsTools) { Remove-Item -Path $ddsTools -Recurse -Force -ErrorAction SilentlyContinue }
         Write-Success "Copied UAssetTool (cleaned .pdb + ue4-dds-tools)"
     }
@@ -284,7 +282,7 @@ See LICENSE for details.
     
     $components = @(
         @{Name = "Main Application"; Path = "REPAK-X.exe" },
-        @{Name = "UAssetTool"; Path = "uassettool\UAssetTool.dll" }
+        @{Name = "UAssetTool"; Path = "UAssetTool.dll" }
         # Note: hash_helper.exe is no longer needed - CityHash64 is now implemented natively in UAssetTool
         # Note: Oodle DLL is downloaded on-demand by the app, not bundled
     )
