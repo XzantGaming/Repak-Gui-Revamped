@@ -248,10 +248,10 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose, characte
                         borderBottomRightRadius: details.is_encrypted ? '0' : '4px',
                         fontWeight: 600,
                         fontSize: '0.85rem',
-                        background: 'rgba(139, 92, 246, 0.15)',
-                        color: '#a78bfa',
-                        border: '1px solid rgba(139, 92, 246, 0.35)',
-                        borderLeft: details.is_iostore ? 'none' : '1px solid rgba(139, 92, 246, 0.35)'
+                        background: 'rgba(76, 175, 80, 0.15)',
+                        color: '#4CAF50',
+                        border: '1px solid rgba(76, 175, 80, 0.35)',
+                        borderLeft: details.is_iostore ? 'none' : '1px solid rgba(76, 175, 80, 0.35)'
                       }} title="Contains both IO Store assets and Legacy Pak raw assets">Hybrid</div>
                     )}
                     {details.is_encrypted && (

@@ -185,6 +185,7 @@ type ViewMode = 'grid' | 'compact' | 'list' | 'list-compact'
 type DroppedModParse = {
   is_dir?: boolean
   contains_uassets?: boolean
+  contains_raw_assets?: boolean
   [key: string]: any
 }
 
@@ -197,6 +198,7 @@ type SingleModConflict = {
 type InstallModPayload = ModRecord & {
   customName?: string
   selectedTags?: string[]
+  hybrid?: boolean
 }
 
 type AppSettings = {
@@ -595,6 +597,18 @@ function App() {
       setStatus(`Error parsing dropped items: ${error}`)
     }
   }
+  const handleMergeHybrid = async (path1: string, path2: string) => {
+    try {
+      const mergedModsData = await invoke('merge_mods_for_hybrid', { path1, path2 }) as DroppedModParse[]
+      if (mergedModsData && mergedModsData.length > 0) {
+        setModsToInstall(mergedModsData)
+      }
+    } catch (error) {
+      console.error('Failed to merge mods:', error)
+      setStatus(`Error merging hybrid mods: ${error}`)
+    }
+  }
+
 
   const handleCheckClashes = async () => {
     try {
@@ -2929,6 +2943,7 @@ function App() {
           onCancel={() => setPanel('install', false)}
           onNewTag={(callback) => setNewTagPrompt({ callback })}
           onNewFolder={(callback) => setNewFolderFromInstall({ callback })}
+          onMergeHybrid={handleMergeHybrid}
         />
       )}
 

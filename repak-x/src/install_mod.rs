@@ -91,6 +91,25 @@ pub fn contains_uasset_files(files: &[String]) -> bool {
     })
 }
 
+/// Returns true if the file list contains any RAW non-Unreal assets
+/// (files that are NOT .uasset, .uexp, .ubulk, .umap, or .uptnl)
+pub fn contains_raw_files(files: &[String]) -> bool {
+    files.iter().any(|f| {
+        let lower = f.to_lowercase();
+        
+        // Ignore specific repak/iostore metadata files and directories
+        if lower.contains("chunknames") || lower.contains("patched_files") {
+            return false;
+        }
+
+        !lower.ends_with(".uasset")
+            && !lower.ends_with(".uexp")
+            && !lower.ends_with(".ubulk")
+            && !lower.ends_with(".umap")
+            && !lower.ends_with(".uptnl")
+    })
+}
+
 pub const AES_KEY_HEX: &str = "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74";
 
 fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {

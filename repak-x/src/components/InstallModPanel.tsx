@@ -23,6 +23,7 @@ type ModInput = {
   mod_type?: string
   is_dir?: boolean
   contains_uassets?: boolean
+  contains_raw_assets?: boolean
   auto_to_repak?: boolean
   auto_force_legacy?: boolean
   [key: string]: any
@@ -33,10 +34,12 @@ type ModSetting = {
   obfuscate: boolean
   toRepak: boolean
   forceLegacy: boolean
+  hybrid: boolean
   compression: string
   customName: string
   selectedTags: string[]
   installSubfolder: string | null
+  path: string
 }
 
 type InstallModPanelProps = {
@@ -50,7 +53,9 @@ type InstallModPanelProps = {
   onCancel: () => void
   onNewTag: (callback: (tag: string) => void) => void
   onNewFolder: (callback: (name: string) => void) => void
+  onMergeHybrid?: (path1: string, path2: string) => void
 }
+
 
 type TreeNodeMap = {
   id?: string
@@ -168,19 +173,23 @@ const buildInitialSettings = (mods: ModInput[] = []): Record<number, ModSetting>
     const locked = isRepakLocked(mod)
     const defaultToRepak = mod.is_dir ? !locked : Boolean(mod.auto_to_repak)
     const canApplyPatches = mod.contains_uassets !== false // Default to true if undefined
+    const isHybrid = Boolean(mod.contains_uassets && mod.contains_raw_assets)
 
     // For mods with no uassets, we skip repak (IoStore logic) and likely enforce legacy
-    const effectiveToRepak = !canApplyPatches ? false : (locked ? false : defaultToRepak)
+    const effectiveToRepak = isHybrid ? true : (!canApplyPatches ? false : (locked ? false : defaultToRepak))
+    const forceLegacy = isHybrid ? false : (mod.contains_uassets === false ? true : (mod.auto_force_legacy || false))
 
     acc[idx] = {
       enabled: true,
       obfuscate: false,
       toRepak: effectiveToRepak,
-      forceLegacy: mod.contains_uassets === false ? true : (mod.auto_force_legacy || false),
+      forceLegacy: forceLegacy,
+      hybrid: isHybrid,
       compression: 'Oodle',
       customName: '',
       selectedTags: [],
-      installSubfolder: null // Per-mod install destination
+      installSubfolder: null, // Per-mod install destination
+      path: mod.path
     }
     return acc
   }, {} as Record<number, ModSetting>)
@@ -211,7 +220,7 @@ function parseModType(modType: string | undefined): { character: string | null; 
   return { character, category, additional }
 }
 
-export default function InstallModPanel({ mods, allTags, folders = [], onCreateTag, onDeleteTag, onCreateFolder, onInstall, onCancel, onNewTag, onNewFolder }: InstallModPanelProps) {
+export default function InstallModPanel({ mods, allTags, folders = [], onCreateTag, onDeleteTag, onCreateFolder, onInstall, onCancel, onNewTag, onNewFolder, onMergeHybrid }: InstallModPanelProps) {
   const [openDropdown, setOpenDropdown] = useState<number | null>(null)
   const [dropdownPos, setDropdownPos] = useState({ x: 0, y: 0 })
   const [modSettings, setModSettings] = useState<Record<number, ModSetting>>(() => buildInitialSettings(mods))
@@ -230,8 +239,12 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
     console.log('[InstallModPanel] Received mods:', mods.length, mods)
     setModSettings(prev => {
       const newSettings = buildInitialSettings(mods)
-      return mods.reduce((acc, _, idx) => {
-        acc[idx] = prev[idx] !== undefined ? prev[idx] : newSettings[idx]
+      const prevSettingsArray = Object.values(prev)
+      
+      return mods.reduce((acc, mod, idx) => {
+        // Try to find existing settings by path
+        const existing = prevSettingsArray.find(s => s.path === mod.path)
+        acc[idx] = existing !== undefined ? existing : newSettings[idx]
         return acc
       }, {} as Record<number, ModSetting>)
     })
@@ -351,6 +364,21 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
 
         {/* Mod Cards */}
         <div className="imp-mods-section">
+          {mods.length > 1 && mods.some(m => m.contains_uassets !== false) && mods.some(m => m.contains_raw_assets && m.contains_uassets === false) && (
+            <div className="install-hybrid-merge-banner" style={{ background: 'rgba(76, 175, 80, 0.1)', border: '1px solid #4CAF50', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="hybrid-merge-text" style={{ display: 'flex', flexDirection: 'column' }}>
+                <span className="hybrid-merge-title" style={{ color: '#4CAF50', fontWeight: 'bold' }}>Hybrid Match Detected</span>
+                <span className="hybrid-merge-desc" style={{ fontSize: '0.9em', opacity: 0.8 }}>You dropped both cooked assets and raw assets. Would you like to merge them into a single Hybrid mod?</span>
+              </div>
+              <button className="btn-hybrid" onClick={() => {
+                const uassetMod = mods.find(m => m.contains_uassets !== false)
+                const rawMod = mods.find(m => m.contains_raw_assets && m.contains_uassets === false)
+                if (uassetMod && rawMod && onMergeHybrid) {
+                  onMergeHybrid(uassetMod.path, rawMod.path)
+                }
+              }}>Merge as Hybrid</button>
+            </div>
+          )}
           {mods.length === 0 ? (
             <div className="install-empty-state">No mods detected in the drop.</div>
           ) : (
@@ -414,8 +442,8 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
                           </span>
                         ))}
                         {mod.contains_uassets === false && (
-                          <span className="no-uassets-badge" title="This mod contains no UAsset files - patch options disabled">
-                            No UAssets
+                          <span className="no-uassets-badge" title="This mod contains Raw Assets (no UAsset files)">
+                            Raw Assets
                           </span>
                         )}
                       </div>
@@ -519,14 +547,42 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
 
                         <Switch
                           size="md"
+                          color="success"
+                          checked={modSettings[idx]?.hybrid || false}
+                          onChange={(value) => {
+                            if (mod.contains_uassets === false || mod.contains_raw_assets === false) return
+                            updateModSetting(idx, 'hybrid', value)
+                            if (value) {
+                              updateModSetting(idx, 'toRepak', true)
+                              updateModSetting(idx, 'forceLegacy', false)
+                            }
+                          }}
+                          isDisabled={mod.contains_uassets === false || mod.contains_raw_assets === false}
+                          className={`install-toggle hybrid-toggle ${(mod.contains_uassets === false || mod.contains_raw_assets === false) ? 'locked' : (modSettings[idx]?.hybrid ? 'active' : '')}`}
+                          title="Generate a Hybrid IOStore bundle containing both raw assets and cooked uassets."
+                        >
+                          <div className="install-toggle__text">
+                            <span className="install-toggle__label">Hybrid IOStore</span>
+                            <span className="install-toggle__hint">
+                              {(mod.contains_uassets === false || mod.contains_raw_assets === false) 
+                                ? 'Needs raw and cooked assets'
+                                : (modSettings[idx]?.hybrid
+                                  ? 'Hybrid bundle enabled'
+                                  : 'Merge raw & cooked assets into IOStore')}
+                            </span>
+                          </div>
+                        </Switch>
+
+                        <Switch
+                          size="md"
                           color="warning"
-                          checked={mod.contains_uassets === false ? true : (modSettings[idx]?.forceLegacy || false)}
+                          checked={mod.contains_uassets === false ? true : (modSettings[idx]?.hybrid ? false : (modSettings[idx]?.forceLegacy || false))}
                           onChange={(value) => {
                             if (mod.contains_uassets === false) return
                             updateModSetting(idx, 'forceLegacy', value)
                           }}
-                          isDisabled={mod.contains_uassets === false}
-                          className={`install-toggle legacy-toggle ${mod.contains_uassets === false ? 'active locked' : (modSettings[idx]?.forceLegacy ? 'active' : '')}`}
+                          isDisabled={mod.contains_uassets === false || modSettings[idx]?.hybrid || Boolean(mod.contains_uassets && mod.contains_raw_assets)}
+                          className={`install-toggle legacy-toggle ${mod.contains_uassets === false ? 'active locked' : (modSettings[idx]?.hybrid || Boolean(mod.contains_uassets && mod.contains_raw_assets) ? 'locked' : (modSettings[idx]?.forceLegacy ? 'active' : ''))}`}
                           title="Use when making Audio/Config mods (mods that don't contain uassets)"
                         >
                           <div className="install-toggle__text">
@@ -534,9 +590,11 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
                             <span className="install-toggle__hint">
                               {mod.contains_uassets === false
                                 ? 'Forced for non-UAsset mods'
-                                : (modSettings[idx]?.forceLegacy
-                                  ? 'Skipping IoStore conversion'
-                                  : 'Use for Audio/Config mods (no uassets)')}
+                                : (Boolean(mod.contains_uassets && mod.contains_raw_assets)
+                                  ? 'Unavailable for Hybrid mods'
+                                  : (modSettings[idx]?.forceLegacy
+                                    ? 'Skipping IoStore conversion'
+                                    : 'Use for Audio/Config mods (Raw Assets)'))}
                             </span>
                           </div>
                         </Switch>
@@ -545,10 +603,10 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
                           <Switch
                             size="md"
                             color="secondary"
-                            checked={modSettings[idx]?.toRepak || false}
+                            checked={modSettings[idx]?.hybrid ? true : (modSettings[idx]?.toRepak || false)}
                             onChange={(value) => updateModSetting(idx, 'toRepak', value)}
-                            isDisabled={repakLocked}
-                            className={`install-toggle repak-toggle ${repakLocked ? 'locked' : ''} ${modSettings[idx]?.toRepak ? 'active' : ''}`}
+                            isDisabled={repakLocked || modSettings[idx]?.hybrid}
+                            className={`install-toggle repak-toggle ${(repakLocked || modSettings[idx]?.hybrid) ? 'locked' : ''} ${modSettings[idx]?.toRepak ? 'active' : ''}`}
                             title={repakTitle}
                           >
                             <div className="install-toggle__text">

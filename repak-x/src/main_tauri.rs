@@ -20,6 +20,7 @@ mod uasset_detection;
 mod utils;
 mod utoc_utils;
 mod vfx_updater;
+mod merge_command;
 
 use log::{error, info, warn};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -907,6 +908,9 @@ struct InstallableModInfo {
     /// Whether the mod contains any .uasset/.uexp/.ubulk/.umap files
     /// Used by frontend to lock/unlock certain toggles (e.g., fix texture only applies to uasset mods)
     contains_uassets: bool,
+    /// Whether the mod contains any non-Unreal assets (audio, config, video)
+    /// Used by frontend to identify Hybrid IOStore drop scenarios
+    contains_raw_assets: bool,
 }
 
 #[tauri::command]
@@ -949,8 +953,8 @@ async fn parse_dropped_files(
             .unwrap_or("Unknown")
             .to_string();
 
-        // Determine mod type and contains_uassets flag
-        let (mod_type, contains_uassets) = if path.is_dir() {
+        // Determine mod type, contains_uassets and contains_raw_assets flag
+        let (mod_type, contains_uassets, contains_raw_assets) = if path.is_dir() {
             // First check if directory contains multiple PAK files - if so, process each PAK separately
             use walkdir::WalkDir;
             let mut pak_files = Vec::new();
@@ -1110,20 +1114,21 @@ async fn parse_dropped_files(
                     info!("{}", summary);
                     let _ = window.emit("install_log", &summary);
 
-                    // Check if directory contains uasset files
-                    use crate::install_mod::contains_uasset_files;
+                    // Check if directory contains uasset files or raw assets
+                    use crate::install_mod::{contains_uasset_files, contains_raw_files};
                     let has_uassets = contains_uasset_files(&all_files_absolute);
+                    let has_raw_assets = contains_raw_files(&all_files_absolute);
                     let _ = window.emit(
                         "install_log",
-                        format!("[Detection] Contains UAssets: {}", has_uassets),
+                        format!("[Detection] Contains UAssets: {}, Raw: {}", has_uassets, has_raw_assets),
                     );
 
-                    (mod_type, has_uassets)
+                    (mod_type, has_uassets, has_raw_assets)
                 } else {
-                    ("Directory".to_string(), true) // Default to true for safety
+                    ("Directory".to_string(), true, false) // Default to true for safety
                 }
             } else {
-                ("Directory".to_string(), true) // Default to true for safety
+                ("Directory".to_string(), true, false) // Default to true for safety
             }
         } else {
             // Get file extension
@@ -1221,13 +1226,15 @@ async fn parse_dropped_files(
 
                                 let mut pak_mod_type = "Archive".to_string();
                                 let mut pak_has_uassets = false;
+                                let mut pak_has_raw_assets = false;
 
                                 if let Some(files) = files_opt {
-                                    use crate::install_mod::contains_uasset_files;
+                                    use crate::install_mod::{contains_uasset_files, contains_raw_files};
                                     use crate::utils::get_pak_characteristics_detailed;
                                     let chars = get_pak_characteristics_detailed(files.clone());
                                     pak_mod_type = chars.mod_type.clone();
                                     pak_has_uassets = contains_uasset_files(&files);
+                                    pak_has_raw_assets = contains_raw_files(&files);
                                 }
 
                                 let _ = window.emit(
@@ -1247,6 +1254,7 @@ async fn parse_dropped_files(
                                     path: path_str.clone(),
                                     auto_to_repak: !is_ios,
                                     contains_uassets: pak_has_uassets,
+                                    contains_raw_assets: pak_has_raw_assets,
                                 });
                             }
                             continue;
@@ -1404,9 +1412,10 @@ async fn parse_dropped_files(
                                 // Clean up temp dir
                                 drop(temp_dir);
 
-                                // Check if files contain uassets
-                                use crate::install_mod::contains_uasset_files;
+                                // Check if files contain uassets or raw assets
+                                use crate::install_mod::{contains_uasset_files, contains_raw_files};
                                 let has_uassets = contains_uasset_files(&files);
+                                let has_raw_assets = contains_raw_files(&files);
 
                                 mods.push(InstallableModInfo {
                                     mod_name,
@@ -1415,6 +1424,7 @@ async fn parse_dropped_files(
                                     path: path_str,
                                     auto_to_repak: !is_iostore,
                                     contains_uassets: has_uassets,
+                                    contains_raw_assets: has_raw_assets,
                                 });
                                 continue;
                             }
@@ -1475,9 +1485,10 @@ async fn parse_dropped_files(
                                     // Clean up temp dir
                                     drop(temp_dir);
 
-                                    // Check if content files contain uassets
-                                    use crate::install_mod::contains_uasset_files;
+                                    // Check if content files contain uassets or raw assets
+                                    use crate::install_mod::{contains_uasset_files, contains_raw_files};
                                     let has_uassets = contains_uasset_files(&content_files);
+                                    let has_raw_assets = contains_raw_files(&content_files);
 
                                     // Add as a directory mod (will be converted to IoStore)
                                     mods.push(InstallableModInfo {
@@ -1487,6 +1498,7 @@ async fn parse_dropped_files(
                                         path: path_str,
                                         auto_to_repak: false,
                                         contains_uassets: has_uassets,
+                                        contains_raw_assets: has_raw_assets,
                                     });
                                     continue;
                                 }
@@ -1496,7 +1508,7 @@ async fn parse_dropped_files(
                 }
 
                 // Fallback if extraction/analysis failed
-                ("Archive".to_string(), true) // Default to true for safety
+                ("Archive".to_string(), true, false) // Default to true for safety
             } else if ext == "pak" {
                 // Check if this is an IoStore package (has .utoc and .ucas companions)
                 let utoc_path = path.with_extension("utoc");
@@ -1635,9 +1647,10 @@ async fn parse_dropped_files(
                         info!("{}", summary);
                         let _ = window.emit("install_log", &summary);
 
-                        // Check if files contain uassets
-                        use crate::install_mod::contains_uasset_files;
+                        // Check if files contain uassets or raw assets
+                        use crate::install_mod::{contains_uasset_files, contains_raw_files};
                         let has_uassets = contains_uasset_files(&files);
+                        let has_raw_assets = contains_raw_files(&files);
 
                         // Push this PAK mod and continue processing other files
                         mods.push(InstallableModInfo {
@@ -1647,6 +1660,7 @@ async fn parse_dropped_files(
                             path: path_str,
                             auto_to_repak: !is_iostore,
                             contains_uassets: has_uassets,
+                            contains_raw_assets: has_raw_assets,
                         });
                         continue; // Continue to next file instead of returning
                     }
@@ -1654,9 +1668,9 @@ async fn parse_dropped_files(
                     "PAK".to_string()
                 };
 
-                (mod_type, true) // Default to true for safety
+                (mod_type, true, false) // Default to true for safety
             } else {
-                ("Unknown".to_string(), true) // Default to true for safety
+                ("Unknown".to_string(), true, false) // Default to true for safety
             }
         };
 
@@ -1673,6 +1687,7 @@ async fn parse_dropped_files(
             path: path_str,
             auto_to_repak,
             contains_uassets,
+            contains_raw_assets,
         });
     }
 
@@ -1699,6 +1714,9 @@ struct ModToInstall {
     /// Enable IoStore obfuscation for this install (per-mod, not global)
     #[serde(default)]
     obfuscate: bool,
+    /// Whether to generate a hybrid IOStore bundle (keeping raw assets)
+    #[serde(default)]
+    hybrid: bool,
 }
 
 /// Helper function to copy an IoStore bundle (.utoc/.ucas and .pak or .bak_repak) and recompress if needed
@@ -2561,6 +2579,7 @@ async fn install_mods(
             installable.force_legacy_pak = mod_to_install.force_legacy;
             installable.install_subfolder = mod_to_install.install_subfolder.clone();
             installable.obfuscate = mod_to_install.obfuscate;
+            installable.hybrid = mod_to_install.hybrid;
         } else {
             // No matching user settings found (common for archive-expanded mods)
             // IMPORTANT: Do NOT override repak or force_legacy_pak here!
@@ -2569,6 +2588,7 @@ async fn install_mods(
             if let Some(first_mod) = mods.first() {
                 installable.install_subfolder = first_mod.install_subfolder.clone();
                 installable.obfuscate = first_mod.obfuscate;
+                installable.hybrid = first_mod.hybrid;
                 // repak and force_legacy_pak are intentionally NOT overridden
             }
         }
@@ -2749,6 +2769,19 @@ async fn install_mods(
                 window_for_logs.emit("install_log", &msg).ok();
                 toast_events::emit_installation_failed(&window_for_logs, &msg);
                 error!("Installation thread panicked!");
+            }
+        }
+
+        // --- CLEANUP TEMP HYBRID FOLDERS ---
+        for path in unique_paths {
+            if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                if file_name.starts_with("hybrid_merge_") {
+                    if let Err(e) = std::fs::remove_dir_all(&path) {
+                        let _ = window_for_logs.emit("install_log", format!("Failed to clean up temp hybrid folder {}: {}", path.display(), e));
+                    } else {
+                        let _ = window_for_logs.emit("install_log", format!("Cleaned up temp hybrid folder {}", path.display()));
+                    }
+                }
             }
         }
     });
@@ -7651,6 +7684,7 @@ fn main() {
             start_file_watcher,
             get_pak_files,
             get_pak_files_in_folder,
+            merge_command::merge_mods_for_hybrid,
             parse_dropped_files,
             install_mods,
             quick_organize,

@@ -224,7 +224,7 @@
   flex-direction: row;
   box-shadow: 0 18px 28px rgba(0, 0, 0, 0.35);
   overflow: hidden;
-  max-height: 310px;
+  max-height: 320px;
   transition: opacity 0.2s ease;
 }
 
@@ -321,8 +321,8 @@
 
 .install-mod-card__toggles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 0.35rem 0.75rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.35rem 0.5rem;
   padding: 0.75rem;
   border-radius: 12px;
   background: rgba(0, 0, 0, 0.25);
@@ -332,33 +332,42 @@
 .install-toggle {
   display: inline-flex;
   align-items: center;
-  padding: 0.4rem 1rem 0.4rem 0.4rem;
+  padding: 0.4rem 0.5rem 0.4rem 0.4rem;
   border-radius: 12px;
   transition: background 0.2s ease;
+  min-width: 0;
 }
 
 .install-toggle .repakx-switch-control {
-  margin-right: 0.5rem;
+  margin-right: 0.4rem;
+  flex-shrink: 0;
 }
 
 .install-toggle .repakx-switch-label {
   flex: 1;
+  min-width: 0;
 }
 
 .install-toggle__text {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
+  min-width: 0;
 }
 
 .install-toggle__label {
   font-weight: 600;
   display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.9rem;
 }
 
 .install-toggle__hint {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: var(--text-secondary);
+  line-height: 1.2;
 }
 
 .install-toggle:hover {
@@ -372,7 +381,6 @@
 
 .install-mod-card__footer {
   display: flex;
-  flex-wrap: wrap;
   gap: 0.5rem;
   justify-content: space-evenly;
   align-items: center;
@@ -429,6 +437,28 @@
   color: #42a5f5;
 }
 
+/* Hybrid IOStore Toggle Styling */
+.hybrid-toggle {
+  background: rgba(76, 175, 80, 0.08);
+  border: 1px solid rgba(76, 175, 80, 0.2);
+  border-radius: 12px;
+  transition: all 0.2s ease;
+}
+
+.hybrid-toggle:hover {
+  background: rgba(76, 175, 80, 0.12);
+  border-color: rgba(76, 175, 80, 0.3);
+}
+
+.hybrid-toggle.active {
+  background: rgba(76, 175, 80, 0.15);
+  border-color: rgba(76, 175, 80, 0.4);
+}
+
+.hybrid-toggle .install-toggle__label {
+  color: #4CAF50;
+}
+
 /* Legacy PAK Toggle Styling */
 .legacy-toggle {
   background: rgba(255, 160, 0, 0.08);
@@ -451,13 +481,17 @@
   color: #ffa000;
 }
 
-/* Locked toggles in Legacy mode */
+/* Locked toggles */
 .install-toggle.locked {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.install-toggle.locked .install-toggle__hint {
+.install-toggle.locked:not(.active) .install-toggle__hint {
+  color: var(--text-secondary) !important;
+}
+
+.legacy-toggle.locked.active .install-toggle__hint {
   color: #ffa000;
   font-style: italic;
 }
@@ -541,6 +575,25 @@
 
 .btn-install:hover {
   background: var(--accent-secondary);
+}
+
+.btn-hybrid {
+  padding: 8px 32px;
+  background: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.2);
+  white-space: nowrap;
+}
+
+.btn-hybrid:hover {
+  background: #45a049;
+  box-shadow: 0 4px 16px rgba(76, 175, 80, 0.4);
 }
 
 .btn-cancel {
