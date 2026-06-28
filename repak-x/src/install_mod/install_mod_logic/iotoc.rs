@@ -153,6 +153,7 @@ pub fn convert_to_iostore_directory(
         None,                    // Use default AES key
         pak.parallel_processing, // Toggle: false=50%, true=75% CPU threads
         pak.obfuscate,           // Encrypt with game's AES key to block FModel extraction
+        pak.hybrid,              // Hybrid: keep non-Unreal files in the companion PAK
     )
     .map_err(|e| format!("IoStore conversion failed: {}", e))?;
 

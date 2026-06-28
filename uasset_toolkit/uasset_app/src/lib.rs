@@ -413,6 +413,7 @@ impl SyncToolkit {
         aes_key: Option<&str>,
         parallel: bool,
         obfuscate: bool,
+        hybrid: bool,
     ) -> Result<IoStoreResult> {
         let request = UAssetRequest::CreateModIoStore {
             output_path: output_path.to_string(),
@@ -423,6 +424,7 @@ impl SyncToolkit {
             aes_key: aes_key.map(|s| s.to_string()),
             parallel,
             obfuscate,
+            hybrid,
         };
 
         let response = self.send_request(&request)?;
@@ -472,6 +474,7 @@ impl SyncToolkit {
         aes_key: Option<&str>,
         parallel: bool,
         obfuscate: bool,
+        hybrid: bool,
     ) -> Result<IoStoreResult> {
         let request = UAssetRequest::CreateModIoStore {
             output_path: output_path.to_string(),
@@ -482,6 +485,7 @@ impl SyncToolkit {
             aes_key: aes_key.map(|s| s.to_string()),
             parallel,
             obfuscate,
+            hybrid,
         };
 
         log::info!(
@@ -719,6 +723,10 @@ pub enum UAssetRequest {
         parallel: bool,
         #[serde(default)]
         obfuscate: bool,
+        /// Hybrid mode: embed non-Unreal files (audio/.png/.bin/...) as loose entries in the
+        /// companion PAK instead of dropping them. Defaults off for backward compatibility.
+        #[serde(default)]
+        hybrid: bool,
     },
 }
 
@@ -896,6 +904,7 @@ pub fn create_mod_iostore(
     aes_key: Option<&str>,
     parallel: bool,
     obfuscate: bool,
+    hybrid: bool,
 ) -> Result<IoStoreResult> {
     let toolkit = get_global_toolkit()?;
     toolkit.create_mod_iostore(
@@ -906,6 +915,7 @@ pub fn create_mod_iostore(
         aes_key,
         parallel,
         obfuscate,
+        hybrid,
     )
 }
 
@@ -920,6 +930,7 @@ pub fn create_mod_iostore_from_pak(
     aes_key: Option<&str>,
     parallel: bool,
     obfuscate: bool,
+    hybrid: bool,
 ) -> Result<IoStoreResult> {
     let toolkit = get_global_toolkit()?;
     toolkit.create_mod_iostore_from_pak(
@@ -930,6 +941,7 @@ pub fn create_mod_iostore_from_pak(
         aes_key,
         parallel,
         obfuscate,
+        hybrid,
     )
 }
 

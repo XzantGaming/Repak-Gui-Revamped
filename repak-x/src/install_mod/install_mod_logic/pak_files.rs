@@ -88,6 +88,7 @@ pub fn create_repak_from_pak_fast(
         Some(AES_KEY_HEX),       // Use Marvel Rivals AES key
         pak.parallel_processing, // Toggle: false=50%, true=75% CPU threads
         pak.obfuscate,           // Encrypt if enabled
+        pak.hybrid,              // Hybrid: keep non-Unreal files in the companion PAK
     )
     .map_err(|e| format!("Failed to create IoStore from PAK: {}", e))?;
 

@@ -44,6 +44,10 @@ pub struct InstallableMod {
     /// Enable obfuscation (encrypts IoStore with game's AES key to block extraction tools like FModel)
     #[serde(default)]
     pub obfuscate: bool,
+    /// Hybrid IoStore: embed non-Unreal files (audio/.png/.bin/...) as loose entries in the
+    /// companion PAK instead of dropping them. Set by the frontend; defaults off.
+    #[serde(default)]
+    pub hybrid: bool,
 }
 
 impl Default for InstallableMod {
@@ -70,6 +74,7 @@ impl Default for InstallableMod {
             install_subfolder: String::new(),
             parallel_processing: false,
             obfuscate: false,
+            hybrid: false,
         }
     }
 }
