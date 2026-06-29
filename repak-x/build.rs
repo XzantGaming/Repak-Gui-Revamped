@@ -35,12 +35,14 @@ fn linux_build() {
     let dest_dir = exe_dir.join("uassettool");
     let dest_path = dest_dir.join("UAssetTool");
 
-    let primary_src = target_dir.join("uassettool").join("UAssetTool");
-
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .to_path_buf();
+
+    // Use workspace_root to derive the CI-published binary path, because target_dir
+    // includes the target triple when building with --target (cross-compilation).
+    let primary_src = workspace_root.join("target").join("uassettool").join("UAssetTool");
     let tools_dir = workspace_root
         .join("UAssetToolRivals")
         .join("src")
@@ -264,12 +266,15 @@ fn windows_build() {
     let dest_dir = exe_dir.clone();
     let dest_path = dest_dir.join("UAssetTool.dll");
 
-    let primary_src = target_dir.join("uassettool").join("UAssetTool.dll");
-
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .to_path_buf();
+
+    // Use workspace_root to derive the CI-published DLL path, because target_dir
+    // includes the target triple when building with --target (cross-compilation),
+    // which would give the wrong path (target/<triple>/uassettool instead of target/uassettool).
+    let primary_src = workspace_root.join("target").join("uassettool").join("UAssetTool.dll");
     let tools_dir = workspace_root
         .join("UAssetToolRivals")
         .join("src")
