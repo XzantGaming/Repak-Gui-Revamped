@@ -8,7 +8,7 @@
 - Added detection for Hybrid IO Store Mods
 
 ### 🎨 Frontend / UI
-- Added Hybrid bundle toggle to mod install panel, drop an hybrid-ready mod folder or merge paks and foldes to create one
+- Added Hybrid bundle toggle to mod install panel, drop an hybrid-ready mod folder or merge paks and folders to create one
 - Added a Sig Bypasser toggle in the Tools panel
 - Mod type labels are now additive
 - Dropping mods (pak/folders) into Mod Install panel will now add them to the installation queue

@@ -1765,6 +1765,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs_extra"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
+
+[[package]]
 name = "fsevent-sys"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5480,7 +5486,7 @@ checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
 name = "repak-x"
-version = "1.4.3"
+version = "1.5.0"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -5492,6 +5498,7 @@ dependencies = [
  "colored",
  "dirs",
  "discord-rich-presence",
+ "fs_extra",
  "futures",
  "hex",
  "igd-next 0.16.2",
@@ -7306,7 +7313,7 @@ checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
 
 [[package]]
 name = "uasset_app"
-version = "1.4.3"
+version = "1.5.0"
 dependencies = [
  "anyhow",
  "libloading 0.8.6",
