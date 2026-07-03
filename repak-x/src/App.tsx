@@ -1,75 +1,68 @@
-import { useState, useEffect, useRef } from 'react'
-import type { ChangeEvent } from 'react'
-import type { UnlistenFn } from '@tauri-apps/api/event'
-import { invoke } from '@tauri-apps/api/core'
-import { open } from '@tauri-apps/plugin-dialog'
-import { listen } from '@tauri-apps/api/event'
-import { motion, AnimatePresence } from 'framer-motion'
-import { useDebouncedCallback } from 'use-debounce'
-import { IconButton, Tooltip } from '@mui/material'
 import {
-  Refresh as RefreshIcon,
-  CreateNewFolder as CreateNewFolderIcon,
-  Search as SearchIcon,
-  Clear as ClearIcon,
-  ExpandMore as ExpandMoreIcon,
-  ChevronRight as ChevronRightIcon,
-  Folder as FolderIcon,
-  GridView as GridViewIcon,
-  ViewModule as ViewModuleIcon,
-  ViewList as ViewListIcon,
-  ViewHeadline as ViewHeadlineIcon,
-  ViewSidebar as ViewSidebarIcon,
-  PlayArrow as PlayArrowIcon,
   Check as CheckIcon,
-  ToggleOn as ToggleOnIcon,
+  Clear as ClearIcon,
+  CreateNewFolder as CreateNewFolderIcon,
+  GridView as GridViewIcon,
+  PlayArrow as PlayArrowIcon,
+  Refresh as RefreshIcon,
+  Search as SearchIcon,
   ToggleOff as ToggleOffIcon,
+  ToggleOn as ToggleOnIcon,
+  ViewHeadline as ViewHeadlineIcon,
+  ViewList as ViewListIcon,
+  ViewModule as ViewModuleIcon,
+  ViewSidebar as ViewSidebarIcon
 } from '@mui/icons-material'
-import { RiDeleteBin2Fill } from 'react-icons/ri'
-import { MdDriveFileMoveOutline } from "react-icons/md"
-import { FaTag, FaToolbox, FaSort } from "react-icons/fa6"
-import { IoMdWifi, IoIosSettings, IoMdWarning } from "react-icons/io"
-import { GrInstall } from "react-icons/gr"
+import { IconButton } from '@mui/material'
+import { invoke } from '@tauri-apps/api/core'
+import type { UnlistenFn } from '@tauri-apps/api/event'
+import { listen } from '@tauri-apps/api/event'
+import { open } from '@tauri-apps/plugin-dialog'
+import { AnimatePresence, motion } from 'framer-motion'
+import type { ChangeEvent } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { FaSort, FaTag, FaToolbox } from "react-icons/fa6"
 import { GiLightningTrio } from "react-icons/gi"
-import Checkbox from './components/ui/Checkbox'
-import ModDetailsPanel from './components/ModDetailsPanel'
-import ModsList from './components/ModsList'
-import FileTree from './components/FileTree'
-import FolderTree from './components/FolderTree'
+import { IoIosSettings, IoMdWarning, IoMdWifi } from "react-icons/io"
+import { MdDriveFileMoveOutline, MdLocalOffer } from "react-icons/md"
+import { RiDeleteBin2Fill } from 'react-icons/ri'
+import { useDebouncedCallback } from 'use-debounce'
+import './App.css'
+import AddModSplitButton from './components/AddModSplitButton'
+import { AlertProvider, useAlert } from './components/AlertHandler'
+import ChangelogModal from './components/ChangelogModal'
 import ContextMenu from './components/ContextMenu'
-import LogDrawer from './components/LogDrawer'
+import CustomDropdown from './components/CustomDropdown'
 import DropZoneOverlay from './components/DropZoneOverlay'
 import ExtensionModOverlay from './components/ExtensionModOverlay'
-import QuickOrganizeOverlay from './components/QuickOrganizeOverlay'
+import FileTree from './components/FileTree'
+import FolderTree from './components/FolderTree'
+import HeroFilterDropdown from './components/HeroFilterDropdown'
 import InputPromptModal from './components/InputPromptModal'
-import UpdateModModal from './components/UpdateModModal'
-import UpdateAppModal from './components/UpdateAppModal'
-import ChangelogModal from './components/ChangelogModal'
+import LogDrawer from './components/LogDrawer'
+import ModDetailsPanel from './components/ModDetailsPanel'
+import ModsList from './components/ModsList'
+import OnboardingTour from './components/OnboardingTour'
 import PromiseTransitionLoader from './components/PromiseTransitionLoader'
+import QuickOrganizeOverlay from './components/QuickOrganizeOverlay'
+import ShortcutsHelpModal from './components/ShortcutsHelpModal'
 import { AuroraText } from './components/ui/AuroraText'
-import { AlertProvider, useAlert } from './components/AlertHandler'
-import { useGlobalTooltips } from './hooks/useGlobalTooltips'
-import { useAprilFools } from './hooks/useAprilFools'
-import Switch from './components/ui/Switch'
-import NumberInput from './components/ui/NumberInput'
+import ModularLogo from './components/ui/ModularLogo'
+import UpdateAppModal from './components/UpdateAppModal'
+import UpdateModModal from './components/UpdateModModal'
 import characterDataStatic from './data/character_data.json'
-import './App.css'
-import './styles/theme.css'
+import { useAprilFools } from './hooks/useAprilFools'
+import { useGlobalTooltips } from './hooks/useGlobalTooltips'
 import './styles/Badges.css'
 import './styles/Fonts.css'
 import './styles/GlobalTooltips.css'
-import ModularLogo from './components/ui/ModularLogo'
-import HeroFilterDropdown from './components/HeroFilterDropdown'
-import CustomDropdown from './components/CustomDropdown'
-import ShortcutsHelpModal from './components/ShortcutsHelpModal'
-import AddModSplitButton from './components/AddModSplitButton'
-import OnboardingTour from './components/OnboardingTour'
+import './styles/theme.css'
 
 // Utility functions
-import { toTagArray } from './utils/tags'
+import { normalizeModBaseName } from './utils/format'
 import { detectHeroes } from './utils/heroes'
-import { formatFileSize, normalizeModBaseName } from './utils/format'
 import { getAdditionalCategories } from './utils/mods'
+import { toTagArray } from './utils/tags'
 
 const ACCENT_COLORS_MAP: Record<string, string> = {
   red: '#be1c1c',
@@ -93,12 +86,12 @@ const VFX_UPDATER_MOD_PREFILL_KEY = 'repakx:vfxUpdater:modPath'
 
 import TitleBar from './components/TitleBar'
 
+import ClashPanel from './components/ClashPanel'
+import CreditsPanel from './components/CreditsPanel'
 import InstallModPanel from './components/InstallModPanel'
 import SettingsPanel from './components/SettingsPanel'
-import CreditsPanel from './components/CreditsPanel'
-import ToolsPanel from './components/ToolsPanel'
 import SharingPanel from './components/SharingPanel'
-import ClashPanel from './components/ClashPanel'
+import ToolsPanel from './components/ToolsPanel'
 
 type ModRecord = {
   path: string
@@ -2144,6 +2137,27 @@ function App() {
     }
   }
 
+  const handleBulkToggleTag = async (tag: string) => {
+    const selectedModsList = mods.filter(m => selectedMods.has(m.path))
+    const allHaveTag = selectedModsList.every(m => m.custom_tags && m.custom_tags.includes(tag))
+    
+    try {
+      if (allHaveTag) {
+        for (const modPath of selectedMods) {
+          await handleRemoveTag(modPath, tag)
+        }
+        setStatus(`Removed tag "${tag}" from ${selectedMods.size} mod(s)`)
+      } else {
+        for (const modPath of selectedMods) {
+          await handleAddTagToSingleMod(modPath, tag)
+        }
+        setStatus(`Assigned tag "${tag}" to ${selectedMods.size} mod(s)`)
+      }
+    } catch (e) {
+      setStatus(`Error: ${e}`)
+    }
+  }
+
   // Rename a mod (calls backend to rename actual file)
   const handleRenameMod = async (modPath: string, newName: string) => {
     if (gameRunning && !bypassGameRunningLock) {
@@ -3568,6 +3582,40 @@ function App() {
                         else handleAssignToFolder(val)
                       }}
                       placeholder="Move to..."
+                      disabled={selectedMods.size === 0}
+                    />
+                  </div>
+
+                  <div style={{ width: '200px', height: '40px', marginLeft: '4px' }}>
+                    <CustomDropdown
+                      icon={<MdLocalOffer style={{ fontSize: '1.2rem', opacity: 0.7 }} />}
+                      options={[
+                        { value: '_new_tag_', label: '+ New Tag...' },
+                        ...(allTags || []).map(t => ({ value: t, label: t }))
+                      ]}
+                      value="" 
+                      onChange={(val) => {
+                        if (!val) return
+                        if (val === '_new_tag_') {
+                          setNewTagPrompt({ callback: async (tag) => {
+                            if (tag) {
+                              try {
+                                for (const modPath of selectedMods) {
+                                  await invoke('add_custom_tag', { modPath, tag })
+                                }
+                                setStatus(`Assigned new tag "${tag}" to ${selectedMods.size} mod(s)`)
+                                await loadMods()
+                                await loadTags()
+                              } catch (e) {
+                                setStatus(`Error: ${e}`)
+                              }
+                            }
+                          }})
+                        } else {
+                          handleBulkToggleTag(val)
+                        }
+                      }}
+                      placeholder="Manage Tags..."
                       disabled={selectedMods.size === 0}
                     />
                   </div>
