@@ -154,8 +154,6 @@ struct AppState {
     launcher_type: String,
 
     custom_tag_catalog: Vec<String>,
-    #[serde(default)]
-    mod_custom_tags: std::collections::HashMap<String, Vec<String>>,
     /// Last known crash folder name for detecting crashes from previous sessions
     #[serde(default)]
     last_known_crash_folder: Option<String>,
@@ -185,7 +183,6 @@ impl Default for AppState {
             enable_drp: default_true(),
             launcher_type: default_launcher_type(),
             custom_tag_catalog: Vec::new(),
-            mod_custom_tags: std::collections::HashMap::new(),
             last_known_crash_folder: None,
             mod_details_cache: std::collections::HashMap::new(),
         }
@@ -658,7 +655,6 @@ async fn get_pak_files(state: State<'_, Arc<Mutex<AppState>>>) -> Result<Vec<Mod
                     }
                 }
             }
-            let custom_tags = state.mod_custom_tags.get(file_stem).cloned().unwrap_or_default();
 
             mods.push(ModEntry {
                 path: path.to_path_buf(),
@@ -666,7 +662,7 @@ async fn get_pak_files(state: State<'_, Arc<Mutex<AppState>>>) -> Result<Vec<Mod
                 enabled: is_enabled,
                 custom_name: None,
                 folder_id,
-                custom_tags,
+                custom_tags: Vec::new(),
                 file_size,
                 modified_date,
                 priority,
@@ -792,7 +788,6 @@ async fn get_pak_files_in_folder(
                     }
                 }
             }
-            let custom_tags = state.mod_custom_tags.get(file_stem).cloned().unwrap_or_default();
 
             mods.push(ModEntry {
                 path: path.to_path_buf(),
@@ -800,7 +795,7 @@ async fn get_pak_files_in_folder(
                 enabled: is_enabled,
                 custom_name: None,
                 folder_id,
-                custom_tags,
+                custom_tags: Vec::new(),
                 file_size,
                 modified_date,
                 priority,
@@ -898,11 +893,6 @@ async fn set_mod_priority(
     {
         let mut state_guard = state.lock().unwrap();
         state_guard.mod_details_cache.remove(&path);
-        
-        if let Some(tags) = state_guard.mod_custom_tags.remove(stem) {
-            state_guard.mod_custom_tags.insert(new_stem.clone(), tags);
-            let _ = save_state(&state_guard);
-        }
     }
 
     Ok(())
@@ -1727,8 +1717,6 @@ struct ModToInstall {
     /// Whether to generate a hybrid IOStore bundle (keeping raw assets)
     #[serde(default)]
     hybrid: bool,
-    #[serde(rename = "selectedTags", default)]
-    selected_tags: Vec<String>,
 }
 
 /// Helper function to copy an IoStore bundle (.utoc/.ucas and .pak or .bak_repak) and recompress if needed
@@ -2606,25 +2594,6 @@ async fn install_mods(
         }
 
         installable.parallel_processing = parallel_processing;
-    }
-
-    // Save custom tags from installable_mods into AppState
-    {
-        let mut state_guard = state.lock().unwrap();
-        for m in mods.iter() {
-            if !m.selected_tags.is_empty() {
-                // Use mod_name as base name to generate final stem
-                let base = crate::install_mod::install_mod_logic::normalize_mod_base_name(&m.mod_name, 7);
-                let entry = state_guard.mod_custom_tags.entry(base).or_default();
-                for t in &m.selected_tags {
-                    if !entry.contains(t) {
-                        entry.push(t.clone());
-                    }
-                }
-                entry.sort();
-            }
-        }
-        let _ = save_state(&state_guard);
     }
 
     // Use existing installation logic
@@ -3539,11 +3508,6 @@ async fn rename_mod(
     {
         let mut state_guard = state.lock().unwrap();
         state_guard.mod_details_cache.remove(&old_path_buf);
-        
-        if let Some(tags) = state_guard.mod_custom_tags.remove(&old_stem) {
-            state_guard.mod_custom_tags.insert(new_stem.clone(), tags);
-            let _ = save_state(&state_guard);
-        }
     }
 
     info!(
@@ -4040,24 +4004,15 @@ async fn assign_mod_to_folder(
 
 #[tauri::command]
 async fn add_custom_tag(
-    mod_path: String,
+    _mod_path: String,
     tag: String,
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<(), String> {
     let mut state = state.lock().unwrap();
 
     if !state.custom_tag_catalog.contains(&tag) {
-        state.custom_tag_catalog.push(tag.clone());
+        state.custom_tag_catalog.push(tag);
         state.custom_tag_catalog.sort();
-    }
-
-    let path = PathBuf::from(&mod_path);
-    let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
-    
-    let tags = state.mod_custom_tags.entry(file_stem).or_default();
-    if !tags.contains(&tag) {
-        tags.push(tag);
-        tags.sort();
     }
 
     save_state(&state).map_err(|e| e.to_string())?;
@@ -4089,29 +4044,16 @@ async fn delete_tag_from_all_mods(
 
     state.custom_tag_catalog.retain(|t| t != &tag);
 
-    for tags in state.mod_custom_tags.values_mut() {
-        tags.retain(|t| t != &tag);
-    }
-
     save_state(&state).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
 async fn remove_custom_tag(
-    mod_path: String,
-    tag: String,
-    state: State<'_, Arc<Mutex<AppState>>>,
+    _mod_path: String,
+    _tag: String,
+    _state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<(), String> {
-    let mut state = state.lock().unwrap();
-    let path = PathBuf::from(&mod_path);
-    let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
-
-    if let Some(tags) = state.mod_custom_tags.get_mut(&file_stem) {
-        tags.retain(|t| t != &tag);
-    }
-
-    save_state(&state).map_err(|e| e.to_string())?;
     Ok(())
 }
 
