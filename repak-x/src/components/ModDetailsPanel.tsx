@@ -153,7 +153,7 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose, characte
             className="header-action-btn"
             onClick={onUpdateMod}
             title="Replace Mod File"
-            style={{ marginLeft: 'auto' }}
+            style={{ marginLeft: 'auto', flexShrink: 0 }}
           >
             <FaExchangeAlt /> Replace
           </button>

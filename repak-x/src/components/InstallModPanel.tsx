@@ -46,6 +46,7 @@ type InstallModPanelProps = {
   mods: ModInput[]
   allTags: string[]
   folders?: FolderRecord[]
+  currentFolderId?: string
   onCreateTag?: (tag: string) => void
   onDeleteTag?: (tag: string) => void
   onCreateFolder?: (name: string) => Promise<string | null>
@@ -168,7 +169,7 @@ const FolderNode = ({ node, selectedFolderId, onSelect, depth = 0 }: FolderNodeP
 
 const isRepakLocked = (mod: any = {}) => mod.is_dir
 
-const buildInitialSettings = (mods: ModInput[] = []): Record<number, ModSetting> => {
+const buildInitialSettings = (mods: ModInput[] = [], currentFolderId?: string): Record<number, ModSetting> => {
   return mods.reduce((acc, mod, idx) => {
     const locked = isRepakLocked(mod)
     const defaultToRepak = mod.is_dir ? !locked : Boolean(mod.auto_to_repak)
@@ -188,7 +189,7 @@ const buildInitialSettings = (mods: ModInput[] = []): Record<number, ModSetting>
       compression: 'Oodle',
       customName: '',
       selectedTags: [],
-      installSubfolder: null, // Per-mod install destination
+      installSubfolder: currentFolderId && currentFolderId !== 'all' ? currentFolderId : null, // Per-mod install destination
       path: mod.path
     }
     return acc
@@ -220,10 +221,10 @@ function parseModType(modType: string | undefined): { character: string | null; 
   return { character, category, additional }
 }
 
-export default function InstallModPanel({ mods, allTags, folders = [], onCreateTag, onDeleteTag, onCreateFolder, onInstall, onCancel, onNewTag, onNewFolder, onMergeHybrid }: InstallModPanelProps) {
+export default function InstallModPanel({ mods, allTags, folders = [], currentFolderId, onCreateTag, onDeleteTag, onCreateFolder, onInstall, onCancel, onNewTag, onNewFolder, onMergeHybrid }: InstallModPanelProps) {
   const [openDropdown, setOpenDropdown] = useState<number | null>(null)
   const [dropdownPos, setDropdownPos] = useState({ x: 0, y: 0 })
-  const [modSettings, setModSettings] = useState<Record<number, ModSetting>>(() => buildInitialSettings(mods))
+  const [modSettings, setModSettings] = useState<Record<number, ModSetting>>(() => buildInitialSettings(mods, currentFolderId))
   // Removed global selectedFolderId since we now track it per-mod in modSettings
   const [isCreatingFolder, setIsCreatingFolder] = useState(false)
 
@@ -238,7 +239,7 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
   useEffect(() => {
     console.log('[InstallModPanel] Received mods:', mods.length, mods)
     setModSettings(prev => {
-      const newSettings = buildInitialSettings(mods)
+      const newSettings = buildInitialSettings(mods, currentFolderId)
       const prevSettingsArray = Object.values(prev)
       
       return mods.reduce((acc, mod, idx) => {

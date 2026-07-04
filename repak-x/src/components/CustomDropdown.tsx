@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './CustomDropdown.css';
 
-type DropdownOption = string | { value: string; label: string };
+type DropdownOption = string | { value: string; label: string; showDelete?: boolean };
 
 type CustomDropdownProps = {
     options?: DropdownOption[];
@@ -14,6 +14,7 @@ type CustomDropdownProps = {
     onAddNew?: () => void;
     addNewLabel?: string;
     onDeleteOption?: (value: string) => void;
+    alwaysShowDeleteIcon?: boolean;
 };
 
 /**
@@ -37,7 +38,8 @@ const CustomDropdown = ({
     disabled = false,
     onAddNew,
     addNewLabel = "+ Add New",
-    onDeleteOption
+    onDeleteOption,
+    alwaysShowDeleteIcon = false
 }: CustomDropdownProps) => {
     const [isOpen, setIsOpen] = useState(false);
     const dropdownRef = useRef<HTMLDivElement | null>(null);
@@ -89,7 +91,7 @@ const CustomDropdown = ({
                 style={disabled ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
             >
                 {icon && <span className="custom-dropdown-icon">{icon}</span>}
-                {getLabel(value)}
+                <span className="custom-dropdown-text">{getLabel(value)}</span>
             </button>
 
             {isOpen && !disabled && (
@@ -109,6 +111,7 @@ const CustomDropdown = ({
                         options.map((option, index) => {
                             const optValue = typeof option === 'string' ? option : option.value;
                             const optLabel = typeof option === 'string' ? option : option.label;
+                            const optShowDelete = typeof option === 'string' ? true : option.showDelete === true;
                             const isSelected = optValue === value;
 
                             // Optional separator logic could be passed in, but for now simple list
@@ -120,14 +123,14 @@ const CustomDropdown = ({
                                     title={optLabel}
                                 >
                                     <span className="custom-dropdown-item-label">{optLabel}</span>
-                                    {onDeleteOption && optValue && (
+                                    {onDeleteOption && optValue && optShowDelete && (
                                         <button
-                                            className="custom-dropdown-item-delete"
+                                            className={`custom-dropdown-item-delete ${alwaysShowDeleteIcon ? 'always-visible' : ''}`}
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 onDeleteOption(optValue);
                                             }}
-                                            title={`Delete "${optLabel}"`}
+                                            title={`Remove "${optLabel}"`}
                                         >
                                             ×
                                         </button>

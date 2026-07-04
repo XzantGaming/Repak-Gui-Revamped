@@ -27,7 +27,7 @@ type ContextMenuProps = {
   onNewTag: (callback: (tag: string) => void) => void
   onMoveTo: (folderId: string | null) => void
   onMoveFolderTo?: (newParentId: string | null) => void
-  onCreateFolder: (options?: { moveFolderId?: string }) => void
+  onCreateFolder: (options?: { moveFolderId?: string; parentId?: string }) => void
   folders: FolderRecord[]
   onDelete: () => void
   onToggle: () => void
@@ -227,6 +227,10 @@ const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onNewTag, onMove
           }
         }}>
           Copy Path
+        </div>
+        <div className="context-menu-separator" />
+        <div className="context-menu-item" onClick={() => { onCreateFolder({ parentId: folder.id }); onClose(); }}>
+          + New Folder
         </div>
 
         {onMoveFolderTo && (

@@ -8,6 +8,7 @@ mod crash_monitor;
 mod discord_presence;
 mod install_mod;
 mod ip_obfuscation;
+mod merge_command;
 mod p2p_libp2p;
 mod p2p_manager;
 mod p2p_protocol;
@@ -20,7 +21,6 @@ mod uasset_detection;
 mod utils;
 mod utoc_utils;
 mod vfx_updater;
-mod merge_command;
 
 use log::{error, info, warn};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -154,6 +154,8 @@ struct AppState {
     launcher_type: String,
 
     custom_tag_catalog: Vec<String>,
+    #[serde(default)]
+    mod_tags: std::collections::HashMap<String, Vec<String>>,
     /// Last known crash folder name for detecting crashes from previous sessions
     #[serde(default)]
     last_known_crash_folder: Option<String>,
@@ -183,6 +185,7 @@ impl Default for AppState {
             enable_drp: default_true(),
             launcher_type: default_launcher_type(),
             custom_tag_catalog: Vec::new(),
+            mod_tags: std::collections::HashMap::new(),
             last_known_crash_folder: None,
             mod_details_cache: std::collections::HashMap::new(),
         }
@@ -242,6 +245,33 @@ struct ModEntry {
 // ============================================================================
 // TAURI COMMANDS
 // ============================================================================
+
+fn get_mod_key(path: &std::path::Path) -> String {
+    let mut name = path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    if name.ends_with(".bak_repak") {
+        name = name.strip_suffix(".bak_repak").unwrap().to_string();
+    }
+    if name.ends_with("_disabled") {
+        name = name.strip_suffix("_disabled").unwrap().to_string();
+    }
+    if name.ends_with("_P") {
+        name = name.strip_suffix("_P").unwrap().to_string();
+    }
+
+    if let Some(idx) = name.rfind('_') {
+        let suffix = &name[idx + 1..];
+        if !suffix.is_empty() && suffix.chars().all(|c| c == '9') {
+            name.truncate(idx);
+        }
+    }
+
+    name
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AccentColorPreset {
@@ -656,13 +686,16 @@ async fn get_pak_files(state: State<'_, Arc<Mutex<AppState>>>) -> Result<Vec<Mod
                 }
             }
 
+            let key = get_mod_key(&path);
+            let custom_tags = state.mod_tags.get(&key).cloned().unwrap_or_default();
+
             mods.push(ModEntry {
                 path: path.to_path_buf(),
                 utoc_path,
                 enabled: is_enabled,
                 custom_name: None,
                 folder_id,
-                custom_tags: Vec::new(),
+                custom_tags,
                 file_size,
                 modified_date,
                 priority,
@@ -789,13 +822,16 @@ async fn get_pak_files_in_folder(
                 }
             }
 
+            let key = get_mod_key(&path);
+            let custom_tags = state.mod_tags.get(&key).cloned().unwrap_or_default();
+
             mods.push(ModEntry {
                 path: path.to_path_buf(),
                 utoc_path,
                 enabled: is_enabled,
                 custom_name: None,
                 folder_id,
-                custom_tags: Vec::new(),
+                custom_tags,
                 file_size,
                 modified_date,
                 priority,
@@ -1115,12 +1151,15 @@ async fn parse_dropped_files(
                     let _ = window.emit("install_log", &summary);
 
                     // Check if directory contains uasset files or raw assets
-                    use crate::install_mod::{contains_uasset_files, contains_raw_files};
+                    use crate::install_mod::{contains_raw_files, contains_uasset_files};
                     let has_uassets = contains_uasset_files(&all_files_absolute);
                     let has_raw_assets = contains_raw_files(&all_files_absolute);
                     let _ = window.emit(
                         "install_log",
-                        format!("[Detection] Contains UAssets: {}, Raw: {}", has_uassets, has_raw_assets),
+                        format!(
+                            "[Detection] Contains UAssets: {}, Raw: {}",
+                            has_uassets, has_raw_assets
+                        ),
                     );
 
                     (mod_type, has_uassets, has_raw_assets)
@@ -1229,7 +1268,9 @@ async fn parse_dropped_files(
                                 let mut pak_has_raw_assets = false;
 
                                 if let Some(files) = files_opt {
-                                    use crate::install_mod::{contains_uasset_files, contains_raw_files};
+                                    use crate::install_mod::{
+                                        contains_raw_files, contains_uasset_files,
+                                    };
                                     use crate::utils::get_pak_characteristics_detailed;
                                     let chars = get_pak_characteristics_detailed(files.clone());
                                     pak_mod_type = chars.mod_type.clone();
@@ -1413,7 +1454,9 @@ async fn parse_dropped_files(
                                 drop(temp_dir);
 
                                 // Check if files contain uassets or raw assets
-                                use crate::install_mod::{contains_uasset_files, contains_raw_files};
+                                use crate::install_mod::{
+                                    contains_raw_files, contains_uasset_files,
+                                };
                                 let has_uassets = contains_uasset_files(&files);
                                 let has_raw_assets = contains_raw_files(&files);
 
@@ -1486,7 +1529,9 @@ async fn parse_dropped_files(
                                     drop(temp_dir);
 
                                     // Check if content files contain uassets or raw assets
-                                    use crate::install_mod::{contains_uasset_files, contains_raw_files};
+                                    use crate::install_mod::{
+                                        contains_raw_files, contains_uasset_files,
+                                    };
                                     let has_uassets = contains_uasset_files(&content_files);
                                     let has_raw_assets = contains_raw_files(&content_files);
 
@@ -1648,7 +1693,7 @@ async fn parse_dropped_files(
                         let _ = window.emit("install_log", &summary);
 
                         // Check if files contain uassets or raw assets
-                        use crate::install_mod::{contains_uasset_files, contains_raw_files};
+                        use crate::install_mod::{contains_raw_files, contains_uasset_files};
                         let has_uassets = contains_uasset_files(&files);
                         let has_raw_assets = contains_raw_files(&files);
 
@@ -2777,9 +2822,19 @@ async fn install_mods(
             if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
                 if file_name.starts_with("hybrid_merge_") {
                     if let Err(e) = std::fs::remove_dir_all(&path) {
-                        let _ = window_for_logs.emit("install_log", format!("Failed to clean up temp hybrid folder {}: {}", path.display(), e));
+                        let _ = window_for_logs.emit(
+                            "install_log",
+                            format!(
+                                "Failed to clean up temp hybrid folder {}: {}",
+                                path.display(),
+                                e
+                            ),
+                        );
                     } else {
-                        let _ = window_for_logs.emit("install_log", format!("Cleaned up temp hybrid folder {}", path.display()));
+                        let _ = window_for_logs.emit(
+                            "install_log",
+                            format!("Cleaned up temp hybrid folder {}", path.display()),
+                        );
                     }
                 }
             }
@@ -3003,9 +3058,15 @@ async fn update_mod(
 
     info!("Preserved install subfolder: {}", install_subfolder);
 
-    // Get the old mod's custom name and tags from metadata (deprecated)
-    let (old_custom_name, old_custom_tags, old_folder_id) =
-        (None::<String>, Vec::<String>::new(), None::<String>);
+    // Migrate the old mod's custom tags
+    let old_custom_tags = {
+        let mut state_guard = state.lock().unwrap();
+        let old_key = get_mod_key(&actual_old_path);
+        state_guard.mod_tags.remove(&old_key).unwrap_or_default()
+    };
+
+    // (Deprecated old metadata)
+    let (old_custom_name, old_folder_id) = (None::<String>, None::<String>);
 
     info!(
         "Preserved metadata - custom_name: {:?}, tags: {:?}, folder_id: {:?}",
@@ -3164,6 +3225,15 @@ async fn update_mod(
             .join(&install_subfolder)
             .join(&new_mod_filename)
     };
+
+    {
+        let mut state_guard = state.lock().unwrap();
+        let new_key = get_mod_key(&new_mod_path);
+        if !old_custom_tags.is_empty() {
+            state_guard.mod_tags.insert(new_key, old_custom_tags);
+            let _ = save_state(&state_guard);
+        }
+    }
 
     info!("Expected new mod path: {:?}", new_mod_path);
 
@@ -3504,10 +3574,19 @@ async fn rename_mod(
         return Err(error_msg);
     }
 
-    // Invalidate cache for old path
+    // Invalidate cache for old path and migrate tags
     {
         let mut state_guard = state.lock().unwrap();
         state_guard.mod_details_cache.remove(&old_path_buf);
+
+        let old_key = get_mod_key(&old_path_buf);
+        let new_key = get_mod_key(&new_path);
+        if old_key != new_key {
+            if let Some(tags) = state_guard.mod_tags.remove(&old_key) {
+                state_guard.mod_tags.insert(new_key, tags);
+                let _ = save_state(&state_guard);
+            }
+        }
     }
 
     info!(
@@ -4004,15 +4083,22 @@ async fn assign_mod_to_folder(
 
 #[tauri::command]
 async fn add_custom_tag(
-    _mod_path: String,
+    mod_path: String,
     tag: String,
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<(), String> {
     let mut state = state.lock().unwrap();
 
     if !state.custom_tag_catalog.contains(&tag) {
-        state.custom_tag_catalog.push(tag);
+        state.custom_tag_catalog.push(tag.clone());
         state.custom_tag_catalog.sort();
+    }
+
+    let key = get_mod_key(std::path::Path::new(&mod_path));
+    let tags = state.mod_tags.entry(key).or_insert_with(Vec::new);
+    if !tags.contains(&tag) {
+        tags.push(tag);
+        tags.sort();
     }
 
     save_state(&state).map_err(|e| e.to_string())?;
@@ -4050,10 +4136,21 @@ async fn delete_tag_from_all_mods(
 
 #[tauri::command]
 async fn remove_custom_tag(
-    _mod_path: String,
-    _tag: String,
-    _state: State<'_, Arc<Mutex<AppState>>>,
+    mod_path: String,
+    tag: String,
+    state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<(), String> {
+    let mut state = state.lock().unwrap();
+
+    let key = get_mod_key(std::path::Path::new(&mod_path));
+    if let Some(tags) = state.mod_tags.get_mut(&key) {
+        tags.retain(|t| t != &tag);
+        if tags.is_empty() {
+            state.mod_tags.remove(&key);
+        }
+    }
+
+    save_state(&state).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -7508,6 +7605,16 @@ fn handle_deep_link_url(url: &str, app_handle: &tauri::AppHandle) {
 fn main() {
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
+            // Cleanup old uassettool folder from previous versions
+            let old_uassettool_dir = exe_dir.join("uassettool");
+            if old_uassettool_dir.is_dir() {
+                if let Err(e) = std::fs::remove_dir_all(&old_uassettool_dir) {
+                    eprintln!("Failed to remove old uassettool folder {:?}: {}", old_uassettool_dir, e);
+                } else {
+                    println!("Successfully removed old uassettool folder");
+                }
+            }
+
             let log_dir = exe_dir.join("Logs");
             if let Err(e) = std::fs::create_dir_all(&log_dir) {
                 eprintln!("Failed to create log directory {:?}: {}", log_dir, e);

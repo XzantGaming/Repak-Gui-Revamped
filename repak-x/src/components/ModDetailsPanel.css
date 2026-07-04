@@ -12,11 +12,18 @@
   align-items: center;
   padding: 1rem;
   border-bottom: 1px solid var(--panel-border);
+  gap: 1rem;
 }
 
 .details-header h2 {
   font-size: 1rem;
   font-weight: 500;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .close-btn {

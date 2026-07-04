@@ -160,7 +160,7 @@ type ContextMenuState = {
   folder?: FolderRecord | null
 }
 
-type NewFolderPromptState = { paths: string[]; moveFolderId?: string }
+type NewFolderPromptState = { paths: string[]; moveFolderId?: string; parentId?: string }
 type NewTagPromptState = { callback: (tag: string) => void }
 type NewFolderFromInstallState = { callback: (name: string) => void }
 type RenameFolderPromptState = { folderId: string; currentName: string }
@@ -259,7 +259,7 @@ function App() {
     clash: false,
     shortcuts: false
   });
-  
+
   const panelsRef = useRef<PanelState>(panels);
   useEffect(() => {
     panelsRef.current = panels;
@@ -917,7 +917,7 @@ function App() {
     }
   }
 
-  const handleBulkDeleteDown = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handleBulkDeleteDown = (e: React.MouseEvent<HTMLElement>) => {
     e.preventDefault()
     e.stopPropagation()
     if (!holdToDelete) {
@@ -931,7 +931,7 @@ function App() {
     }, 2000)
   }
 
-  const handleBulkDeleteUp = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handleBulkDeleteUp = (e: React.MouseEvent<HTMLElement>) => {
     e.preventDefault()
     e.stopPropagation()
     setIsDeletingBulk(false)
@@ -1783,8 +1783,8 @@ function App() {
     }
   }
 
-  const handleCreateFolder = (options?: { moveFolderId?: string }) => {
-    setNewFolderPrompt({ paths: [], moveFolderId: options?.moveFolderId })
+  const handleCreateFolder = (options?: { moveFolderId?: string; parentId?: string }) => {
+    setNewFolderPrompt({ paths: [], moveFolderId: options?.moveFolderId, parentId: options?.parentId })
   }
 
   // Create a folder and return its ID (for use by overlay components)
@@ -1809,12 +1809,21 @@ function App() {
 
     const paths = newFolderPrompt.paths || []
     const moveFolderId = newFolderPrompt.moveFolderId
+    const parentId = newFolderPrompt.parentId
     const pathCount = paths.length
     const pathsCopy = [...paths]
 
     // Check specific to quick organize flow
     const isQuickOrganize = pathCount > 0
     const isMoveAfterCreate = !!moveFolderId
+
+    let finalFolderName = folderName
+    if (parentId) {
+      const parentFolder = folders.find(f => f.id === parentId)
+      if (parentFolder && !parentFolder.is_root) {
+        finalFolderName = `${parentId}/${folderName}`
+      }
+    }
 
     if (isMoveAfterCreate && gameRunning && !bypassGameRunningLock) {
       setNewFolderPrompt(null)
@@ -1840,11 +1849,11 @@ function App() {
       (async () => {
         try {
           // Create the folder first
-          await invoke('create_folder', { name: folderName })
+          await invoke('create_folder', { name: finalFolderName })
           await loadFolders()
 
           if (isMoveAfterCreate && moveFolderId) {
-            const newId = await invoke('move_folder', { id: moveFolderId, newParentId: folderName }) as string
+            const newId = await invoke('move_folder', { id: moveFolderId, newParentId: finalFolderName }) as string
             if (selectedFolderId === moveFolderId) {
               setSelectedFolderId(newId)
             }
@@ -1852,7 +1861,7 @@ function App() {
             await loadMods()
             setStatus(`Folder moved to "${newId}"`)
 
-            return { folder: folderName, movedFolderId: moveFolderId, isInstall: false, isMove: true }
+            return { folder: finalFolderName, movedFolderId: moveFolderId, isInstall: false, isMove: true }
           }
 
           if (isQuickOrganize) {
@@ -2097,6 +2106,36 @@ function App() {
       await loadTags()
     } catch (error) {
       setStatus(`Error: ${error}`)
+    }
+  }
+
+  const handleBulkAssignTag = async (tag: string) => {
+    if (selectedMods.size === 0) return
+
+    try {
+      for (const modPath of selectedMods) {
+        await invoke('add_custom_tag', { modPath, tag })
+      }
+      setStatus(`Assigned tag "${tag}" to ${selectedMods.size} mod(s)`)
+      await loadMods()
+      await loadTags()
+    } catch (error) {
+      setStatus(`Error assigning tag: ${error}`)
+    }
+  }
+
+  const handleBulkRemoveTag = async (tag: string) => {
+    if (selectedMods.size === 0) return
+
+    try {
+      for (const modPath of selectedMods) {
+        await invoke('remove_custom_tag', { modPath, tag })
+      }
+      setStatus(`Removed tag "${tag}" from ${selectedMods.size} mod(s)`)
+      await loadMods()
+      await loadTags()
+    } catch (error) {
+      setStatus(`Error removing tag: ${error}`)
     }
   }
 
@@ -2839,7 +2878,7 @@ function App() {
       .then((settings: any) => {
         // Resolve hex code from accent preset name
         const hexAccent = ACCENT_COLORS_MAP[settings.accentColor] || ACCENT_COLORS_MAP['red'] || '#be1c1c';
-        
+
         // 1. Apply Theme
         setTheme(settings.theme);
         document.documentElement.setAttribute('data-theme', settings.theme);
@@ -2936,6 +2975,7 @@ function App() {
           mods={modsToInstall}
           allTags={allTags}
           folders={folders}
+          currentFolderId={selectedFolderId}
           onCreateTag={registerTagFromInstallPanel}
           onDeleteTag={handleDeleteTagFromCatalog}
           onCreateFolder={handleCreateFolderAndReturn}
@@ -3051,7 +3091,7 @@ function App() {
         return (
           <InputPromptModal
             isOpen={!!newFolderPrompt}
-            title={promptPathCount > 0 ? "Create Folder & Install" : "Create New Folder"}
+            title={promptPathCount > 0 ? "Create Folder & Install" : newFolderPrompt?.parentId ? `Create Folder in ${newFolderPrompt.parentId.split('/').pop()}` : "Create New Folder"}
             placeholder="Enter folder name..."
             confirmText={promptPathCount > 0 ? "Create & Install" : "Create"}
             onConfirm={handleNewFolderConfirm}
@@ -3360,7 +3400,7 @@ function App() {
             {/* Left Sidebar - Folders */}
             <div className="left-sidebar" data-tour="folder-sidebar">
               {/* Filters Section */}
-              <div 
+              <div
                 className="sidebar-filters"
                 style={filtersHeight !== null ? { height: `${filtersHeight}px` } : { maxHeight: '35vh' }}
               >
@@ -3442,14 +3482,14 @@ function App() {
                 </div>
               </div>
               {/* Vertical Resize Handle */}
-              <div 
+              <div
                 className={`vertical-resizer ${isFiltersResizing ? 'resizing' : ''}`}
                 onMouseDown={handleFiltersResizeStart}
               />
               <div className="sidebar-header">
                 <h3>Folders</h3>
                 <div className="sidebar-header-actions">
-                  <button onClick={() => handleCreateFolder()} className="btn-icon" title="New Folder">
+                  <button onClick={() => handleCreateFolder({ parentId: selectedFolderId !== 'all' ? selectedFolderId : undefined })} className="btn-icon" title="New Folder">
                     <CreateNewFolderIcon fontSize="small" />
                   </button>
                 </div>
@@ -3572,6 +3612,37 @@ function App() {
                     />
                   </div>
 
+                  <div style={{ width: '200px', height: '40px' }}>
+                    <CustomDropdown
+                      icon={<FaTag style={{ fontSize: '1.2rem', opacity: 0.7 }} />}
+                      options={allTags.map(t => {
+                        const isApplied = mods.some(m => selectedMods.has(m.path) && toTagArray(m.custom_tags).includes(t));
+                        return { value: t, label: t, showDelete: isApplied };
+                      })}
+                      value=""
+                      onChange={(tag) => {
+                        if (tag) handleBulkAssignTag(tag)
+                      }}
+                      onDeleteOption={(tag) => {
+                        if (tag) handleBulkRemoveTag(tag)
+                      }}
+                      placeholder="Manage Tags"
+                      disabled={selectedMods.size === 0}
+                      onAddNew={() => setNewTagPrompt({
+                        callback: async (tag) => {
+                          const trimmed = tag.trim()
+                          if (trimmed) {
+                            setAllTags(prev => prev.includes(trimmed) ? prev : [...prev, trimmed].sort())
+                            await invoke('add_tag_to_catalog', { tag: trimmed })
+                            handleBulkAssignTag(trimmed)
+                          }
+                        }
+                      })}
+                      addNewLabel="+ New Tag"
+                      alwaysShowDeleteIcon={true}
+                    />
+                  </div>
+
                   {(() => {
                     const selMods = mods.filter(m => selectedMods.has(m.path))
                     const enabledCount = selMods.filter(m => m.enabled).length
@@ -3579,45 +3650,45 @@ function App() {
                     const allEnabled = disabledCount === 0
                     const allDisabled = enabledCount === 0
                     return (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <div className="split-btn-group" style={{ height: '40px' }}>
                         <button
                           onClick={() => handleBulkToggle(true)}
-                          className="btn-ghost"
-                          style={{ height: '40px', opacity: allEnabled ? 0.4 : 1 }}
+                          className="btn-ghost left"
+                          style={{ height: '100%', opacity: allEnabled ? 0.4 : 1 }}
                           disabled={selectedMods.size === 0 || allEnabled}
                           title={allEnabled ? 'All selected mods are already enabled' : `Enable ${disabledCount} disabled mod${disabledCount !== 1 ? 's' : ''}`}
                         >
                           <ToggleOnIcon fontSize="small" style={{ color: accentColor }} />
-                          {disabledCount > 0 ? `Enable (${disabledCount})` : 'Enable'}
+                          {disabledCount > 0 && `(${disabledCount})`}
                         </button>
                         <button
                           onClick={() => handleBulkToggle(false)}
-                          className="btn-ghost"
-                          style={{ height: '40px', opacity: allDisabled ? 0.4 : 1 }}
+                          className="btn-ghost right"
+                          style={{ height: '100%', opacity: allDisabled ? 0.4 : 1 }}
                           disabled={selectedMods.size === 0 || allDisabled}
                           title={allDisabled ? 'All selected mods are already disabled' : `Disable ${enabledCount} enabled mod${enabledCount !== 1 ? 's' : ''}`}
                         >
                           <ToggleOffIcon fontSize="small" style={{ opacity: 0.7 }} />
-                          {enabledCount > 0 ? `Disable (${enabledCount})` : 'Disable'}
+                          {enabledCount > 0 && `(${enabledCount})`}
                         </button>
                       </div>
                     )
                   })()}
 
-                  <div
+                  <button
                     className={`btn-ghost danger ${isDeletingBulk ? 'holding' : ''}`}
                     onMouseDown={handleBulkDeleteDown}
                     onMouseUp={handleBulkDeleteUp}
                     onMouseLeave={handleBulkDeleteUp}
-                    style={{ marginLeft: '1rem', height: '40px' }}
+                    style={{ height: '40px', justifyContent: 'center' }}
                     title={holdToDelete ? "Hold 2s to delete selected mods" : "Click to delete selected mods"}
                   >
                     <div className="danger-bg" />
-                    <span style={{ position: 'relative', zIndex: 2, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <RiDeleteBin2Fill />
-                      {`Delete (${selectedMods.size})`}
+                    <span style={{ position: 'relative', zIndex: 2, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <RiDeleteBin2Fill size="1.25rem" />
+                      {`(${selectedMods.size})`}
                     </span>
-                  </div>
+                  </button>
                 </div>
               </div>
 

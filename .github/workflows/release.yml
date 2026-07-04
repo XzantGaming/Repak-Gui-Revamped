@@ -184,6 +184,8 @@ jobs:
           
           # Copy UAssetTool and dependencies
           Copy-Item "target/uassettool/*" "$packageDir/" -Recurse
+          if (Test-Path "$packageDir/*.pdb") { Remove-Item "$packageDir/*.pdb" }
+          if (Test-Path "$packageDir/UAssetTool.exe") { Remove-Item "$packageDir/UAssetTool.exe" }
           
           # Copy data files
           Copy-Item "repak-x/src/data/character_data.json" "$packageDir/data/"

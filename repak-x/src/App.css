@@ -1468,9 +1468,28 @@ input[type="text"]:focus {
   transition: border-color 0.2s ease, background 0.2s ease;
 }
 
+.split-btn-group {
+  display: flex;
+  align-items: center;
+}
+
+.split-btn-group .btn-ghost.left {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.split-btn-group .btn-ghost.right {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: -1px;
+}
+
 .btn-ghost:hover {
   border-color: var(--accent-primary, #4a9eff);
   background: color-mix(in srgb, var(--accent-primary), transparent 88%);
+  color: white;
+  position: relative;
+  z-index: 1;
 }
 
 /* Light mode override for ghost buttons */
