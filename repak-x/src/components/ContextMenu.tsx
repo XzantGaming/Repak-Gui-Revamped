@@ -336,7 +336,7 @@ const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onNewTag, onMove
           <div className="scrollable-menu-list" style={{ maxHeight: '300px', overflowY: 'auto', paddingRight: '4px' }}>
             {folders.filter(f => !f.is_root).map(f => (
               <div key={f.id} className="context-menu-item" onClick={() => { onMoveTo(f.id); onClose(); }}>
-                {f.name}
+                {f.id}
               </div>
             ))}
           </div>

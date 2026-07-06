@@ -3631,7 +3631,7 @@ function App() {
                       icon={<MdDriveFileMoveOutline style={{ fontSize: '1.2rem', opacity: 0.7 }} />}
                       options={[
                         { value: 'root', label: 'Root (~mods)' }, // Option to move back to root
-                        ...folders.filter(f => f.name !== '~mods').map(f => ({ value: f.id, label: f.name }))
+                        ...folders.filter(f => f.name !== '~mods').map(f => ({ value: f.id, label: f.id }))
                       ]}
                       value="" // Always reset after selection locally handled by onChange logic below
                       onChange={(val) => {
