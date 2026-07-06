@@ -301,6 +301,8 @@ function App() {
   const [availableCategories, setAvailableCategories] = useState<string[]>([])
   const [showCharacterFilters, setShowCharacterFilters] = useState(false)
   const [showTypeFilters, setShowTypeFilters] = useState(false)
+  const [filterState, setFilterState] = useState<'all' | 'enabled' | 'disabled'>('all')
+  const [showStateFilters, setShowStateFilters] = useState(true)
 
   // Search state with debounce
   const [searchQuery, setSearchQuery] = useState('') // Actual filter query (debounced)
@@ -2433,6 +2435,9 @@ function App() {
       return false
     }
 
+    if (filterState === 'enabled' && !mod.enabled) return false
+    if (filterState === 'disabled' && mod.enabled) return false
+
     // New: Multi-select Character/Hero and Category filters using Mod Detection API
     const hasCharFilter = selectedCharacters.size > 0
     const hasCatFilter = selectedCategories.size > 0
@@ -3407,10 +3412,10 @@ function App() {
                 <div className="sidebar-filters-inner">
                   <div className="filter-title-row">
                     <div className="filter-label">FILTERS</div>
-                    {(selectedCharacters.size > 0 || selectedCategories.size > 0) && (
+                    {(selectedCharacters.size > 0 || selectedCategories.size > 0 || filterState !== 'all') && (
                       <button
                         className="btn-ghost-mini"
-                        onClick={() => { setSelectedCharacters(new Set()); setSelectedCategories(new Set()) }}
+                        onClick={() => { setSelectedCharacters(new Set()); setSelectedCategories(new Set()); setFilterState('all') }}
                         title="Clear all filters"
                       >
                         Clear
@@ -3418,9 +3423,36 @@ function App() {
                     )}
                   </div>
 
-                  {/* Character/Hero Chips */}
+                  {/* State Chips */}
                   <div
                     className="filter-section-header"
+                    onClick={() => setShowStateFilters(v => !v)}
+                  >
+                    <div className="filter-label-secondary">State {filterState !== 'all' ? '(1)' : ''}</div>
+                    <span className="filter-chevron">{showStateFilters ? '\u25bc' : '\u25b6'}</span>
+                  </div>
+                  {showStateFilters && (
+                    <div className="filter-chips-scroll" style={{ marginBottom: '8px' }}>
+                      <button
+                        className={`filter-chip-compact ${filterState === 'enabled' ? 'active' : ''}`}
+                        onClick={() => setFilterState(prev => prev === 'enabled' ? 'all' : 'enabled')}
+                        title="Enabled"
+                      >
+                        Enabled
+                      </button>
+                      <button
+                        className={`filter-chip-compact ${filterState === 'disabled' ? 'active' : ''}`}
+                        onClick={() => setFilterState(prev => prev === 'disabled' ? 'all' : 'disabled')}
+                        title="Disabled"
+                      >
+                        Disabled
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Character/Hero Chips */}
+                  <div
+                    className="filter-section-header with-margin"
                     onClick={() => setShowCharacterFilters(v => !v)}
                   >
                     <div className="filter-label-secondary">Characters {selectedCharacters.size > 0 && `(${selectedCharacters.size})`}</div>
@@ -3514,7 +3546,7 @@ function App() {
                       ).length;
                     }
                   }}
-                  hasFilters={selectedCharacters.size > 0 || selectedCategories.size > 0}
+                  hasFilters={selectedCharacters.size > 0 || selectedCategories.size > 0 || filterState !== 'all'}
                 />
               </div>
             </div>
