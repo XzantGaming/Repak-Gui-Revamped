@@ -17,6 +17,7 @@ if (-not $Cleanup) {
     
     # 3. Delete the Registry Keys
     Remove-Item -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Repak-X' -Force -Recurse
+    Remove-Item -Path 'HKCU:\Software\Classes\repakx' -Force -Recurse
 
     # 4. Copy this script to TEMP and run it to delete the installation folder
     $tempScript = Join-Path $env:TEMP "Uninstall-RepakX-Temp.ps1"
@@ -42,6 +43,20 @@ else {
     Remove-Item -Path $installDir -Recurse -Force
     Remove-Item -Path $configDir -Recurse -Force
     Remove-Item -Path $tauriDir -Recurse -Force
+    
+    # Delete Temp Files and Folders
+    $tempLogsAndFolders = @(
+        "repakx_update",
+        "repakx_updater.bat",
+        "repakx.log",
+        "repak-x"
+    )
+    foreach ($item in $tempLogsAndFolders) {
+        $tempPath = Join-Path $env:TEMP $item
+        if (Test-Path $tempPath) {
+            Remove-Item -Path $tempPath -Recurse -Force
+        }
+    }
     
     # Show success message
     Add-Type -AssemblyName PresentationFramework
