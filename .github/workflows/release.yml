@@ -182,6 +182,9 @@ jobs:
           # Copy main executable
           Copy-Item "target/${{ matrix.target }}/release/REPAK-X.exe" "$packageDir/"
           
+          # Copy uninstaller script
+          Copy-Item "scripts/Uninstall-RepakX.ps1" "$packageDir/"
+          
           # Copy UAssetTool and dependencies
           Copy-Item "target/uassettool/*" "$packageDir/" -Recurse
           if (Test-Path "$packageDir/*.pdb") { Remove-Item "$packageDir/*.pdb" }
