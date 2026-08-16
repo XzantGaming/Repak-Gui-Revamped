@@ -53,6 +53,8 @@ import { useAprilFools } from './hooks/useAprilFools'
 import Switch from './components/ui/Switch'
 import NumberInput from './components/ui/NumberInput'
 import characterDataStatic from './data/character_data.json'
+import { initHeroImages } from './utils/heroImages'
+import { useStableCallback } from './hooks/useStableCallback'
 import './App.css'
 import './styles/theme.css'
 import './styles/Badges.css'
@@ -181,6 +183,15 @@ type CharacterDataEntry = {
 }
 
 type ViewMode = 'grid' | 'compact' | 'list' | 'list-compact'
+
+/** Payload of the `hero_sync_progress` event (see hero_assets.rs). */
+type HeroSyncProgressEvent = {
+  current: number
+  total: number
+  percent: number
+  message: string
+  done: boolean
+}
 
 type DroppedModParse = {
   is_dir?: boolean
@@ -321,6 +332,8 @@ function App() {
   const [installLogs, setInstallLogs] = useState<string[]>([])
   const [modLoadingProgress, setModLoadingProgress] = useState(0) // 0-100 for progress, -1 for indeterminate
   const [isModsLoading, setIsModsLoading] = useState(false) // Track if mods are being loaded
+  // Non-null only while hero portraits are downloading (see 'hero_sync_progress')
+  const [heroSyncProgress, setHeroSyncProgress] = useState<{ percent: number; message: string } | null>(null)
   const [selectedFolderId, setSelectedFolderId] = useState('all')
   const [viewMode, setViewMode] = useState<ViewMode>('list') // 'grid', 'compact', 'list'
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null) // { x, y, mod }
@@ -1160,6 +1173,19 @@ function App() {
       setInstallLogs((prev) => [...prev, String(event.payload)])
     })
 
+    // Hero portrait downloads report into the same drawer progress bar.
+    // Only fires when there is something to fetch (first run, or a hero added
+    // to rivals-resources), so a normal startup emits nothing at all.
+    const unlistenHeroSync = listen('hero_sync_progress', (event: any) => {
+      const { percent, message, done } = event.payload as HeroSyncProgressEvent
+      if (done) {
+        setStatus(message)
+        setHeroSyncProgress(null)
+      } else {
+        setHeroSyncProgress({ percent, message })
+      }
+    })
+
     // Refresh mod list when character data is updated
     const unlistenCharUpdate = listen('character_data_updated', async () => {
       try {
@@ -1290,6 +1316,7 @@ function App() {
       unlistenExtensionError.then(f => f())
       unlistenToast.then(f => f())
       unlistenCrash.then(f => f())
+      unlistenHeroSync.then(f => f())
       document.removeEventListener('dragover', preventDefault)
       document.removeEventListener('drop', preventDefault)
     }
@@ -1461,6 +1488,11 @@ function App() {
       } catch (charErr) {
         console.error('Failed to fetch character data:', charErr)
       }
+
+      // Hero portraits live in rivals-resources and are cached in appdata.
+      // Not awaited: the cached set paints on its own once loaded, and a slow
+      // or unreachable GitHub must never hold up the mods list.
+      void initHeroImages()
 
       const modList = await loadMods()
       await loadFolders()
@@ -2206,6 +2238,27 @@ function App() {
       console.error('Error renaming mod:', error)
     }
   }
+
+  // Stable identities for every callback handed to a mod row.
+  //
+  // ModItem is memoized, but the handlers above are re-created on each App
+  // render, so without this every row in the list re-renders whenever any App
+  // state changes — including on each selection click.
+  const stableModSelect = useStableCallback(handleModSelect)
+  const stableToggleModSelection = useStableCallback(handleToggleModSelection)
+  const stableToggleMod = useStableCallback(handleToggleMod)
+  const stableDeleteMod = useStableCallback(handleDeleteMod)
+  const stableRemoveTag = useStableCallback(handleRemoveTag)
+  const stableSetPriority = useStableCallback(handleSetPriority)
+  const stableContextMenu = useStableCallback(handleContextMenu)
+  const stableRenameMod = useStableCallback(handleRenameMod)
+  const stableClearRenaming = useStableCallback(() => setRenamingModPath(null))
+  const stableRenameBlocked = useStableCallback(() =>
+    alert.warning('Game Running', 'Cannot rename mods while game is running.')
+  )
+  const stableDeleteBlocked = useStableCallback(() =>
+    alert.warning('Game Running', 'Cannot delete mods while game is running.')
+  )
 
   // Handle installing a mod received from the browser extension
   const handleExtensionModInstall = async (targetFolderId: string | null) => {
@@ -3697,34 +3750,28 @@ function App() {
                 viewMode={viewMode}
                 selectedMod={selectedMod}
                 selectedMods={selectedMods}
-                onSelect={handleModSelect}
-                onToggleSelection={handleToggleModSelection}
-                onToggleMod={handleToggleMod}
-                onDeleteMod={handleDeleteMod}
-                onRemoveTag={handleRemoveTag}
-                onSetPriority={handleSetPriority}
-                onContextMenu={handleContextMenu}
+                onSelect={stableModSelect}
+                onToggleSelection={stableToggleModSelection}
+                onToggleMod={stableToggleMod}
+                onDeleteMod={stableDeleteMod}
+                onRemoveTag={stableRemoveTag}
+                onSetPriority={stableSetPriority}
+                onContextMenu={stableContextMenu}
                 hideSuffix={hideSuffix}
                 showHeroIcons={showHeroIcons}
                 showHeroBg={showHeroBg}
                 showModType={showModType}
                 modDetails={modDetails}
                 characterData={characterData}
-                onRename={handleRenameMod}
+                onRename={stableRenameMod}
                 onCheckConflicts={handleCheckSingleModClashes}
                 renamingModPath={renamingModPath}
-                onClearRenaming={() => setRenamingModPath(null)}
+                onClearRenaming={stableClearRenaming}
                 gridRef={modsGridRef}
                 gameRunning={gameRunning && !bypassGameRunningLock}
                 holdToDelete={holdToDelete}
-                onRenameBlocked={() => alert.warning(
-                  'Game Running',
-                  'Cannot rename mods while game is running.'
-                )}
-                onDeleteBlocked={() => alert.warning(
-                  'Game Running',
-                  'Cannot delete mods while game is running.'
-                )}
+                onRenameBlocked={stableRenameBlocked}
+                onDeleteBlocked={stableDeleteBlocked}
               />
             </div>
           </motion.div>
@@ -3770,11 +3817,13 @@ function App() {
       </div >
 
       <LogDrawer
-        status={status}
+        // A running mod operation owns the bar; the hero download is background
+        // work and only takes it over when nothing else is using it.
+        status={!isModsLoading && heroSyncProgress ? heroSyncProgress.message : status}
         logs={installLogs}
         onClear={() => setInstallLogs([])}
-        progress={modLoadingProgress}
-        isLoading={isModsLoading}
+        progress={!isModsLoading && heroSyncProgress ? heroSyncProgress.percent : modLoadingProgress}
+        isLoading={isModsLoading || heroSyncProgress !== null}
         isOpen={isLogDrawerOpen}
         onToggle={() => setIsLogDrawerOpen(v => !v)}
       />

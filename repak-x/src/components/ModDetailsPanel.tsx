@@ -5,9 +5,8 @@ import { FaTag, FaExchangeAlt } from "react-icons/fa"
 import FileTree from './FileTree'
 import { formatFileSize } from '../utils/format'
 import { detectHeroesWithData } from '../utils/heroes'
+import { FALLBACK_HERO_ID, resolveHeroImage, useHeroImages } from '../utils/heroImages'
 import './ModDetailsPanel.css'
-
-const heroImages = import.meta.glob('../assets/hero/*.png', { eager: true }) as Record<string, { default: string }>
 
 type CharacterDataEntry = {
   name: string
@@ -46,6 +45,8 @@ type ModDetailsPanelProps = {
 }
 
 export default function ModDetailsPanel({ mod, initialDetails, onClose, characterData = [], onUpdateMod }: ModDetailsPanelProps) {
+  // Repaint when the synced hero portraits finish loading.
+  useHeroImages()
   const [details, setDetails] = useState<ModDetailsData | null>(initialDetails || null)
   const [loading, setLoading] = useState(!initialDetails)
   const [error, setError] = useState<string | null>(null)
@@ -353,20 +354,8 @@ function getFileIcon(filename: string) {
   return '📄'
 }
 
+// Portraits come from the synced cache (see utils/heroImages), falling back to
+// the 9999 placeholder for unknown/multiple heroes, same as the mods list.
 function getHeroImage(heroName?: string | null, characterData: CharacterDataEntry[] = [], characterId?: string | null): string | undefined {
-  // Direct ID lookup (preferred)
-  if (characterId) {
-    const key = `../assets/hero/${characterId}.png`
-    if (heroImages[key]?.default) return heroImages[key].default
-  }
-
-  if (!heroName) return undefined
-
-  // Fallback: find by base hero name in character data
-  const baseName = heroName.includes(' - ') ? heroName.split(' - ')[0] : heroName
-  const char = characterData.find(c => c.name === baseName)
-  if (!char) return undefined
-
-  const key = `../assets/hero/${char.id}.png`
-  return heroImages[key]?.default
+  return resolveHeroImage(heroName, characterData, characterId, FALLBACK_HERO_ID)
 }

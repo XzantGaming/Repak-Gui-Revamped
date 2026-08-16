@@ -6,6 +6,7 @@
 mod character_data;
 mod crash_monitor;
 mod discord_presence;
+mod hero_assets;
 mod install_mod;
 mod ip_obfuscation;
 mod merge_command;
@@ -7907,7 +7908,11 @@ fn main() {
             vfx_updater::vfx_list_json_files,
             vfx_updater::vfx_get_settings,
             vfx_updater::vfx_save_settings,
-            vfx_updater::vfx_check_usmap_update
+            vfx_updater::vfx_check_usmap_update,
+            hero_assets::sync_hero_images,
+            hero_assets::get_hero_image_ids,
+            hero_assets::get_hero_image,
+            hero_assets::get_hero_cache_dir
         ])
         .on_window_event(|window, event| {
             // When the main window is closed, also close any auxiliary

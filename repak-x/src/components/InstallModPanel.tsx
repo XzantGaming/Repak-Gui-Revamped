@@ -8,8 +8,7 @@ import { VscFolder, VscFolderOpened, VscChevronRight, VscChevronDown, VscNewFold
 import { MdCreateNewFolder } from 'react-icons/md'
 import './InstallModPanel.css'
 import characterData from '../data/character_data.json'
-
-const heroImages = import.meta.glob('../assets/hero/*.png', { eager: true }) as Record<string, { default: string }>
+import { resolveHeroImage, useHeroImages } from '../utils/heroImages'
 
 type FolderRecord = {
   id: string
@@ -222,6 +221,8 @@ function parseModType(modType: string | undefined): { character: string | null; 
 }
 
 export default function InstallModPanel({ mods, allTags, folders = [], currentFolderId, onCreateTag, onDeleteTag, onCreateFolder, onInstall, onCancel, onNewTag, onNewFolder, onMergeHybrid }: InstallModPanelProps) {
+  // Repaint when the synced hero portraits finish loading.
+  useHeroImages()
   const [openDropdown, setOpenDropdown] = useState<number | null>(null)
   const [dropdownPos, setDropdownPos] = useState({ x: 0, y: 0 })
   const [modSettings, setModSettings] = useState<Record<number, ModSetting>>(() => buildInitialSettings(mods, currentFolderId))
@@ -687,14 +688,7 @@ export default function InstallModPanel({ mods, allTags, folders = [], currentFo
   )
 }
 
+// Portraits come from the synced cache (see utils/heroImages).
 function getHeroImage(heroName?: string | null): string | undefined {
-  if (!heroName) return undefined
-
-  // Find by base hero name in character data
-  const baseName = heroName.includes(' - ') ? heroName.split(' - ')[0] : heroName
-  const char = characterData.find(c => c.name === baseName)
-  if (!char) return undefined
-
-  const key = `../assets/hero/${char.id}.png`
-  return heroImages[key]?.default
+  return resolveHeroImage(heroName, characterData)
 }

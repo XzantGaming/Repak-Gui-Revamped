@@ -28,6 +28,11 @@ export interface VfxPipelineResult {
 
 export interface VfxSettings {
   usmapPath: string | null;
+  // Auto-update bookkeeping for the managed USMAP — must be preserved when
+  // saving settings from the UI.
+  usmapSha?: string | null;
+  usmapFilename?: string | null;
+  usmapEtag?: string | null;
 }
 
 export interface VfxTempDirectories {

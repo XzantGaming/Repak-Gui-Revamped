@@ -446,7 +446,15 @@ fn usmap_dir() -> PathBuf {
 
 fn is_in_managed_dir(path: &str) -> bool {
     let managed = usmap_dir();
-    Path::new(path).starts_with(&managed)
+    if Path::new(path).starts_with(&managed) {
+        return true;
+    }
+    // The file dialog can hand back a path whose casing/separators differ from
+    // the one we build (e.g. `C:\Users\...` vs `C:\USERS\...`). Fall back to a
+    // normalized comparison so a managed file picked through Browse is not
+    // mistaken for a custom selection.
+    let normalize = |s: &str| s.replace('/', "\\").to_lowercase();
+    normalize(path).starts_with(&normalize(&managed.to_string_lossy()))
 }
 
 /// Check rivals-depot on GitHub for a newer USMAP and apply it.
@@ -457,8 +465,10 @@ fn is_in_managed_dir(path: &str) -> bool {
 /// - Picks the depot file with the highest changelist number as "latest".
 /// - Downloads into `%APPDATA%/Repak-X/usmap/<filename>` and updates
 ///   `VfxSettings` (path/sha/etag/filename) on success.
-/// - If the user picked a custom file outside the managed directory, the
-///   command does not overwrite the selection — it only reports availability.
+/// - On an automatic check (`force = false`) a custom file the user picked
+///   outside the managed directory is left alone — availability is only
+///   reported. On a manual Fetch (`force = true`) the freshly downloaded
+///   managed file always becomes the active selection and is persisted.
 #[tauri::command]
 pub async fn vfx_check_usmap_update(force: bool) -> Result<VfxUsmapUpdateResult, String> {
     let mut settings = read_vfx_settings_internal();
@@ -538,7 +548,7 @@ pub async fn vfx_check_usmap_update(force: bool) -> Result<VfxUsmapUpdateResult,
             .send()
             .await
             .map_err(|e| format!("[VFX] Refetch failed after 304: {}", e))?;
-        return apply_listing(client.clone(), resp2, &mut settings).await;
+        return apply_listing(client.clone(), resp2, &mut settings, force).await;
     }
 
     if !status.is_success() {
@@ -552,13 +562,14 @@ pub async fn vfx_check_usmap_update(force: bool) -> Result<VfxUsmapUpdateResult,
         });
     }
 
-    apply_listing(client, resp, &mut settings).await
+    apply_listing(client, resp, &mut settings, force).await
 }
 
 async fn apply_listing(
     client: reqwest::Client,
     resp: reqwest::Response,
     settings: &mut VfxSettings,
+    force: bool,
 ) -> Result<VfxUsmapUpdateResult, String> {
     // Capture ETag before consuming the body.
     let etag = resp
@@ -635,6 +646,9 @@ async fn apply_listing(
         Some(p) => !p.is_empty() && !is_in_managed_dir(p),
         None => false,
     };
+    // A manual Fetch is an explicit request for the latest depot file, so it
+    // always takes over the selection — including over a custom one.
+    let adopt_managed = force || !user_has_custom;
 
     let managed_target = usmap_dir().join(&latest_name);
     let local_managed_ok =
@@ -646,18 +660,21 @@ async fn apply_listing(
     }
 
     if local_managed_ok {
-        if !user_has_custom {
+        // The managed copy already matches the depot, so the tracked filename
+        // is correct regardless of which file is currently selected.
+        settings.usmap_filename = Some(latest_name.clone());
+        if adopt_managed {
             settings.usmap_path = Some(managed_target.to_string_lossy().to_string());
-            settings.usmap_filename = Some(latest_name.clone());
         }
-        let _ = write_vfx_settings_internal(settings);
+        write_vfx_settings_internal(settings)?;
         vfx_info(&format!("USMAP up to date: {}", latest_name));
         return Ok(VfxUsmapUpdateResult {
             up_to_date: true,
-            local_path: if user_has_custom {
-                settings.usmap_path.clone()
-            } else {
+            skipped: !adopt_managed,
+            local_path: if adopt_managed {
                 Some(managed_target.to_string_lossy().to_string())
+            } else {
+                settings.usmap_path.clone()
             },
             filename: Some(latest_name),
             version: version_label,
@@ -699,7 +716,7 @@ async fn apply_listing(
 
     settings.usmap_sha = Some(latest_sha);
     settings.usmap_filename = Some(latest_name.clone());
-    if !user_has_custom {
+    if adopt_managed {
         settings.usmap_path = Some(managed_target.to_string_lossy().to_string());
     }
     write_vfx_settings_internal(settings)?;
@@ -712,15 +729,24 @@ async fn apply_listing(
 
     Ok(VfxUsmapUpdateResult {
         updated: true,
-        skipped: user_has_custom,
-        local_path: Some(managed_target.to_string_lossy().to_string()),
+        skipped: !adopt_managed,
+        local_path: if adopt_managed {
+            Some(managed_target.to_string_lossy().to_string())
+        } else {
+            settings.usmap_path.clone()
+        },
         filename: Some(latest_name.clone()),
         version: version_label,
         build_number,
         commit_date,
-        message: if user_has_custom {
+        message: if !adopt_managed {
             format!(
-                "Latest USMAP downloaded ({}). Custom selection kept; click Browse to switch.",
+                "Latest USMAP downloaded ({}). Custom selection kept; click Fetch to switch.",
+                latest_name
+            )
+        } else if user_has_custom {
+            format!(
+                "USMAP updated to {} (replaced custom selection)",
                 latest_name
             )
         } else {

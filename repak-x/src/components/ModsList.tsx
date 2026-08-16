@@ -9,10 +9,9 @@ import NumberInput from './ui/NumberInput'
 import { toTagArray } from '../utils/tags'
 import { formatFileSize } from '../utils/format'
 import { detectHeroesWithData } from '../utils/heroes'
+import { FALLBACK_HERO_ID, resolveHeroImage, useHeroImages } from '../utils/heroImages'
 import './ModsList.css'
 import './ModDetailsPanel.css'
-
-const heroImages = import.meta.glob('../assets/hero/*.png', { eager: true }) as Record<string, { default: string }>
 
 type CharacterDataEntry = {
     name: string
@@ -41,8 +40,12 @@ type ModDetailsRecord = {
 
 type ModItemProps = {
     mod: ModRecord
-    selectedMod: ModRecord | null
-    selectedMods: Set<string>
+    /// Selection state is passed as booleans rather than the shared
+    /// `selectedMod`/`selectedMods` values: those change identity on every
+    /// click, which would invalidate `memo` for every row in the list instead
+    /// of just the two whose appearance actually changed.
+    isViewing: boolean
+    isChecked: boolean
     handleToggleModSelection: (mod: ModRecord, event: React.MouseEvent) => void
     onSelect: (mod: ModRecord) => void
     handleToggleMod: (path: string) => void
@@ -97,39 +100,19 @@ type ModsListProps = {
     holdToDelete?: boolean
 }
 
-// Get hero image by character ID, with name-based fallback
+// Get hero image by character ID, with name-based fallback.
+// Portraits come from the synced cache (see utils/heroImages), so components
+// calling this must also subscribe with useHeroImages() to repaint once the
+// cache loads.
 function getHeroImage(heroName?: string | null, characterData: CharacterDataEntry[] = [], characterId?: string | null): string | undefined {
-    const fallbackKey = '../assets/hero/9999.png'
-    const fallbackImage = heroImages[fallbackKey]?.default
-
-    // Direct ID lookup (preferred)
-    if (characterId) {
-        const key = `../assets/hero/${characterId}.png`
-        if (heroImages[key]?.default) return heroImages[key].default
-    }
-
-    // Return fallback for missing, Unknown, or Multiple Heroes
-    if (!heroName) return fallbackImage
-    if (heroName.toLowerCase().includes('unknown') || heroName.toLowerCase().includes('multiple')) {
-        return fallbackImage
-    }
-
-    // Fallback: find by base hero name in character data
-    const baseName = heroName.includes(' - ') ? heroName.split(' - ')[0] : heroName
-    const char = (characterData || []).find(c => c.name === baseName)
-    if (char) {
-        const key = `../assets/hero/${char.id}.png`
-        if (heroImages[key]?.default) return heroImages[key].default
-    }
-
-    return fallbackImage
+    return resolveHeroImage(heroName, characterData, characterId, FALLBACK_HERO_ID)
 }
 
 // Mod Item Component - Memoized for virtualization performance
 const ModItem = memo(function ModItem({
     mod,
-    selectedMod,
-    selectedMods,
+    isViewing,
+    isChecked,
     handleToggleModSelection,
     onSelect,
     handleToggleMod,
@@ -154,6 +137,9 @@ const ModItem = memo(function ModItem({
     modDetails,
     holdToDelete = true
 }: ModItemProps) {
+    // Portraits load asynchronously from the synced cache; subscribing here
+    // repaints the row when they arrive, which `memo` would otherwise skip.
+    useHeroImages()
     const [isDeleteHolding, setIsDeleteHolding] = useState(false)
     const [isRenaming, setIsRenaming] = useState(false)
     const [renameValue, setRenameValue] = useState('')
@@ -278,7 +264,7 @@ const ModItem = memo(function ModItem({
 
     return (
         <div
-            className={`mod-card ${selectedMods.has(mod.path) ? 'selected' : ''} ${selectedMod?.path === mod.path ? 'viewing' : ''} ${heroImage && showHeroBg ? 'has-hero-bg' : ''}`}
+            className={`mod-card ${isChecked ? 'selected' : ''} ${isViewing ? 'viewing' : ''} ${heroImage && showHeroBg ? 'has-hero-bg' : ''}`}
             onContextMenu={(e) => onContextMenu(e, mod)}
         >
             {/* Blurred hero background for all views */}
@@ -291,7 +277,7 @@ const ModItem = memo(function ModItem({
             <div className="mod-main-row">
                 <div className="mod-checkbox-wrapper">
                     <Checkbox
-                        checked={selectedMods.has(mod.path)}
+                        checked={isChecked}
                         onChange={(checked, e) => {
                             e?.stopPropagation()
                             handleToggleModSelection(mod, e)
@@ -563,8 +549,8 @@ export default function ModsList({
                             <ModItem
                                 key={mod.path}
                                 mod={mod}
-                                selectedMod={selectedMod}
-                                selectedMods={selectedMods}
+                                isViewing={selectedMod?.path === mod.path}
+                                isChecked={selectedMods.has(mod.path)}
                                 onSelect={onSelect}
                                 handleToggleModSelection={onToggleSelection}
                                 handleToggleMod={onToggleMod}

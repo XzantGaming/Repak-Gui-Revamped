@@ -43,6 +43,9 @@ pub struct VfxUatRequest<'a> {
     /// Enable Oodle compression, for `create_mod_iostore` (default-on in the legacy CLI).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compress: Option<bool>,
+    /// Extract dependencies recursively, for `extract_iostore_legacy`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub with_deps: Option<bool>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -204,6 +207,7 @@ pub async fn extract_mod_assets(
         game_paks: Some(game_paks.to_string()),
         mod_path: Some(mod_path.to_string()),
         output_path: Some(output_dir.to_string()),
+        with_deps: Some(true),
         ..Default::default()
     };
 
@@ -216,20 +220,32 @@ pub async fn extract_mod_assets(
     }
 
     let mut assets = Vec::new();
-    find_uassets_recursive(Path::new(output_dir), Path::new(output_dir), &mut assets)?;
+    let mut list_lines = Vec::new();
+
+    if let Some(data) = response.data {
+        if let Some(files) = data.get("files").and_then(|f| f.as_array()) {
+            for file in files {
+                if let Some(s) = file.as_str() {
+                    if s.ends_with(".uasset") {
+                        // For uasset_list.txt (relative, no extension)
+                        let list_entry = s[..s.len() - 7].to_string();
+                        list_lines.push(list_entry);
+
+                        // For the return value (absolute, with extension)
+                        let abs_path = Path::new(output_dir).join(s).to_string_lossy().replace("\\", "/");
+                        assets.push(abs_path);
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort to ensure deterministic order
+    assets.sort();
+    list_lines.sort();
 
     let list_path = Path::new(output_dir).join("uasset_list.txt");
-    let list_content = assets
-        .iter()
-        .map(|p| {
-            let mut p = p.clone();
-            if p.ends_with(".uasset") {
-                p = p[..p.len() - 7].to_string();
-            }
-            p
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let list_content = list_lines.join("\n");
     let _ = fs::write(&list_path, &list_content);
     vfx_debug(&format!(
         "Wrote uasset_list.txt with {} entries",
@@ -264,24 +280,38 @@ pub async fn convert_uassets_to_json(
         message: "Converting assets...".to_string(),
     });
 
-    let mut uasset_paths = Vec::new();
-    find_uasset_paths(Path::new(input_dir), &mut uasset_paths)?;
+    let list_path = Path::new(input_dir).join("uasset_list.txt");
+    let mut file_paths = Vec::new();
+    if list_path.exists() {
+        if let Ok(content) = fs::read_to_string(&list_path) {
+            for line in content.lines() {
+                let line = line.trim();
+                if !line.is_empty() {
+                    let mut path = Path::new(input_dir).join(line);
+                    path.set_extension("uasset");
+                    file_paths.push(path.to_string_lossy().to_string());
+                }
+            }
+        }
+    } else {
+        vfx_warn("uasset_list.txt not found, falling back to scanning directory");
+        let mut uasset_paths = Vec::new();
+        find_uasset_paths(Path::new(input_dir), &mut uasset_paths)?;
+        file_paths = uasset_paths
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+    }
 
     vfx_debug(&format!(
         "convert_uassets_to_json (single batch)\n  input_dir: {}\n  output_dir: {}\n  usmap: {}\n  discovered_uasset_files: {}",
-        input_dir, output_dir, usmap_path, uasset_paths.len()
+        input_dir, output_dir, usmap_path, file_paths.len()
     ));
 
-    if uasset_paths.is_empty() {
+    if file_paths.is_empty() {
         vfx_warn("No .uasset files found to convert");
         return Ok(Vec::new());
     }
-
-    // Flatten all file paths to strings
-    let file_paths: Vec<String> = uasset_paths
-        .iter()
-        .map(|p| p.to_string_lossy().to_string())
-        .collect();
 
     vfx_info(&format!(
         "Converting {} files in single batch using base_path preservation",

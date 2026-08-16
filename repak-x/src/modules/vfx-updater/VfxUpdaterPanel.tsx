@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
 import { usePipeline } from "./hooks/usePipeline";
 import { PIPELINE_STEPS } from "./types";
+import type { VfxSettings } from "./types";
 import { ShineBorder } from "../../components/ui/ShineBorder";
 import { AuroraText } from "../../components/ui/AuroraText";
 import {
@@ -291,7 +292,10 @@ export default function VfxUpdaterPanel() {
   // the Fetch button — show extra UI feedback and ALWAYS apply the latest
   // (even over a custom user selection).
   const runUsmapCheck = useCallback(async (force: boolean) => {
-    if (force) setIsFetchingUsmap(true);
+    if (force) {
+      setIsFetchingUsmap(true);
+      addLog(`Fetching latest USMAP from rivals-depot...`, "info");
+    }
     try {
       const result = await invoke<{
         updated: boolean;
@@ -305,20 +309,14 @@ export default function VfxUpdaterPanel() {
         message: string;
       }>("vfx_check_usmap_update", { force });
 
-      if (force) addLog(`Fetching latest USMAP from rivals-depot...`, "info");
-
+      // `skipped` means the backend downloaded the latest but deliberately
+      // kept a custom user selection — that only happens on auto-checks, so
+      // never override the path in that case.
       if (result.updated && result.localPath && !result.skipped) {
         setUsmapPath(result.localPath);
         addLog(`USMAP ${force ? "fetched" : "auto-updated"}: ${result.filename ?? "(latest)"}`, "success");
       } else if (result.updated && result.skipped) {
-        // Latest was downloaded but a custom user file was kept. On manual
-        // Fetch, switch to the freshly downloaded file regardless.
-        if (force && result.localPath) {
-          setUsmapPath(result.localPath);
-          addLog(`USMAP replaced with latest: ${result.filename ?? "(latest)"}`, "success");
-        } else {
-          addLog(result.message, "warning");
-        }
+        addLog(result.message, "warning");
       } else if (result.upToDate) {
         const details = [
           result.version,
@@ -326,7 +324,9 @@ export default function VfxUpdaterPanel() {
           result.commitDate ? `${result.commitDate}` : null,
         ].filter(Boolean).join(" | ");
         addLog(`USMAP up to date${details ? ` (${details})` : ""}`, force ? "success" : "info");
-        if (result.localPath && (force || !usmapPath)) setUsmapPath(result.localPath);
+        if (result.localPath && !result.skipped && (force || !usmapPath)) {
+          setUsmapPath(result.localPath);
+        }
       } else if (result.message) {
         addLog(result.message, "warning");
       }
@@ -377,7 +377,10 @@ export default function VfxUpdaterPanel() {
         setter(selected);
         if (saveAsUsmap) {
           try {
-            await invoke("vfx_save_settings", { settings: { usmapPath: selected } });
+            // Merge into the existing settings — posting only `usmapPath`
+            // would reset the sha/filename/etag the auto-update relies on.
+            const current = await invoke<VfxSettings>("vfx_get_settings").catch(() => ({} as VfxSettings));
+            await invoke("vfx_save_settings", { settings: { ...current, usmapPath: selected } });
           } catch (e) { }
         }
       }
