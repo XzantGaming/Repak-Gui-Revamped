@@ -4521,81 +4521,6 @@ async fn extract_pak_to_destination(mod_path: String, dest_path: String) -> Resu
     Ok(())
 }
 
-/// Cleanup .ubulk files for textures that have inline data.
-/// This is called after extraction to remove unnecessary .ubulk files
-/// that were pulled from the base game but aren't needed because the
-/// mod's textures have been patched to use inline data.
-async fn cleanup_ubulk_for_inline_textures(output_dir: &PathBuf) {
-    use uasset_toolkit::get_global_toolkit;
-    use walkdir::WalkDir;
-
-    // Find all .uasset files - UAssetTool will detect which are textures
-    let uasset_files: Vec<String> = WalkDir::new(output_dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            let path = e.path();
-            if let Some(ext) = path.extension() {
-                return ext.to_string_lossy().to_lowercase() == "uasset";
-            }
-            false
-        })
-        .map(|e| e.path().to_string_lossy().to_string())
-        .collect();
-
-    if uasset_files.is_empty() {
-        return;
-    }
-
-    log::info!(
-        "[Extraction] Checking {} uasset files for textures with inline data...",
-        uasset_files.len()
-    );
-
-    // Use UAssetToolkit to check which are textures with inline data
-    // The batch_has_inline_texture_data function internally checks asset type
-    match get_global_toolkit() {
-        Ok(toolkit) => {
-            match toolkit.batch_has_inline_texture_data(&uasset_files, None) {
-                Ok(inline_files) => {
-                    log::info!(
-                        "[Extraction] Found {} textures with inline data",
-                        inline_files.len()
-                    );
-
-                    // Delete .ubulk files for textures with inline data
-                    let mut deleted_count = 0;
-                    for uasset_path in inline_files {
-                        let ubulk_path = uasset_path.replace(".uasset", ".ubulk");
-                        if std::path::Path::new(&ubulk_path).exists() {
-                            if let Ok(_) = std::fs::remove_file(&ubulk_path) {
-                                deleted_count += 1;
-                                log::debug!(
-                                    "[Extraction] Deleted unnecessary .ubulk: {}",
-                                    ubulk_path
-                                );
-                            }
-                        }
-                    }
-
-                    if deleted_count > 0 {
-                        log::info!(
-                            "[Extraction] Cleaned up {} unnecessary .ubulk files",
-                            deleted_count
-                        );
-                    }
-                }
-                Err(e) => {
-                    log::warn!("[Extraction] Failed to check inline texture data: {}", e);
-                }
-            }
-        }
-        Err(e) => {
-            log::warn!("[Extraction] UAssetToolkit unavailable for cleanup: {}", e);
-        }
-    }
-}
-
 /// Extract assets from a mod file (PAK or IoStore) to a destination directory.
 /// Automatically detects the mod type and uses the appropriate extraction method.
 /// Handles disabled mods (.bak_repak extension) by treating them as PAK files.
@@ -4734,8 +4659,10 @@ async fn extract_mod_assets_inner(
                 output_dir
             );
 
-            // Post-extraction cleanup: Remove .ubulk files for textures with inline data
-            cleanup_ubulk_for_inline_textures(&output_dir).await;
+            // No post-extraction .ubulk cleanup. UAssetTool sources a package's bulk data from the
+            // container that provided its export data, so a .ubulk is written only when the mod
+            // bundle actually contains one — there is no base-game .ubulk left to clean up, and
+            // deleting them discarded mip data that mods had shipped.
 
             // Emit completion progress
             let _ = window.emit(
