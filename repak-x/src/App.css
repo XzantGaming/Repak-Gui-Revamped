@@ -1722,15 +1722,6 @@ input[type="text"]:focus {
   opacity: 1;
 }
 
-/* Bulk Controls Layout */
-.bulk-controls {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-
-
 .folder-name {
   flex: 1;
   margin-left: 0.5rem;
@@ -1762,15 +1753,107 @@ input[type="text"]:focus {
   flex: 1;
 }
 
+/* Mods list header. Like the bulk toolbar, this has to survive the column
+   narrowing when the details panel opens: the folder name is the only thing
+   allowed to give up width, and it truncates rather than wrapping. */
 .center-header {
+  container-type: inline-size;
+  container-name: modheader;
+
   padding: 1rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: nowrap;
+  gap: 0.75rem;
+  min-width: 0;
   border: 1px solid var(--panel-border);
   border-radius: 8px;
   background: var(--panel-bg);
   flex-shrink: 0;
+}
+
+.center-header .header-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.center-header .header-title h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  margin: 0;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+/* The one flexible element: long folder names ellipsize */
+.header-title-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* The count stays whole -- it is the part worth reading. inline-flex so the
+   collapsing word is a flex item: as an inline-block, `overflow: hidden` would
+   move its baseline to the bottom margin edge and lift it off the number. */
+.center-header .mod-count {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.center-header .header-actions {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* Labels that collapse at narrow widths animate their width down to zero
+   instead of being display:none'd, so the control they sit in resizes with
+   them rather than snapping the moment the text is gone. Each max-width is
+   kept close to the label's real width so the motion starts immediately. */
+.mod-count-word,
+.btn-check-conflicts .btn-label,
+.bulk-count-label {
+  overflow: hidden;
+  white-space: nowrap;
+  transition: max-width 0.22s ease, opacity 0.15s ease, margin 0.22s ease;
+}
+
+.btn-check-conflicts .btn-label {
+  max-width: 7rem;
+}
+
+.mod-count-word,
+.bulk-count-label {
+  max-width: 4rem;
+}
+
+/* The button's own gap and padding shrink alongside its label */
+.btn-check-conflicts {
+  transition: gap 0.22s ease, padding 0.22s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+/* Below ~720px the action buttons would squeeze the title to nothing, so drop
+   the two labels that the icons and the numbers already convey. */
+@container modheader (max-width: 720px) {
+  .btn-check-conflicts .btn-label {
+    max-width: 0;
+    opacity: 0;
+  }
+
+  /* tighten up now that it is icon-only (the title attribute still explains it) */
+  .btn-check-conflicts {
+    gap: 0;
+    padding-left: 0.55rem;
+    padding-right: 0.55rem;
+  }
+
+  .mod-count-word {
+    max-width: 0;
+    opacity: 0;
+  }
 }
 
 .mod-list-grid {
@@ -1782,19 +1865,154 @@ input[type="text"]:focus {
 
 
 
+/* Bulk Actions Toolbar
+   Sized to survive the mods column narrowing when the details panel opens:
+   nothing wraps, the two dropdowns absorb the shrink, and the labels collapse
+   via container queries before anything is allowed to overflow. */
 .bulk-actions-toolbar {
-  padding: 0.5rem 1rem;
+  container-type: inline-size;
+  container-name: bulkbar;
+
+  padding: 0.3rem 0.5rem;
   background: var(--bg-darker);
   border: 1px solid var(--panel-border);
   border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  min-width: 0;
   flex-shrink: 0;
 }
 
 .bulk-actions-toolbar.inactive {
   display: none;
+}
+
+/* Only the label text is kept from wrapping -- deliberately NOT on the toolbar
+   root, which would leak into the open dropdown's option list and stop long
+   folder/tag names from wrapping there. */
+.bulk-actions-toolbar .selection-info,
+.bulk-actions-toolbar .btn-ghost {
+  white-space: nowrap;
+}
+
+.bulk-actions-toolbar .selection-info {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex: 0 0 auto;
+}
+
+.bulk-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  line-height: 1;
+  border-radius: 999px;
+  background: var(--accent-primary);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.bulk-count-value {
+  display: block;
+  transform: translateY(-1px);
+}
+
+.bulk-count-label {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.bulk-actions-toolbar .bulk-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.375rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Slimmer controls: 30px tall instead of 40px.
+   The global `button` rule sets `min-height: 36px`, which beats `height` -- so
+   without this reset the dropdown trigger renders 36px inside its 30px field
+   and hangs 6px below it, sitting off-centre next to the other controls. */
+.bulk-actions-toolbar .btn-ghost,
+.bulk-field .custom-dropdown-trigger {
+  min-height: 0;
+}
+
+.bulk-actions-toolbar .btn-ghost {
+  height: 30px;
+  padding: 0 0.65rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  justify-content: center;
+}
+
+.bulk-toggle-group,
+.bulk-delete {
+  flex: 0 0 auto;
+}
+
+.bulk-toggle-group {
+  height: 30px;
+}
+
+/* The dropdowns are the flexible part -- they give up width first */
+.bulk-field {
+  flex: 1 1 150px;
+  min-width: 80px;
+  max-width: 190px;
+  height: 30px;
+}
+
+.bulk-field .custom-dropdown-trigger {
+  font-size: 0.8rem;
+  border-radius: 8px;
+  padding: 0 1.75rem 0 0.55rem;
+  background-size: 16px 16px;
+  background-position: right 0.45rem center;
+}
+
+.bulk-field .custom-dropdown-icon {
+  font-size: 1em;
+}
+
+.bulk-label-short {
+  display: none;
+}
+
+/* The mods column bottoms out around 530px: the window minimum is 1200px and
+   the split is clamped to 70-75%. These two steps fire well before that, so the
+   dropdowns never reach their min-width and never truncate in practice. */
+
+/* ~690px -- the common case with the details panel open */
+@container bulkbar (max-width: 700px) {
+  .bulk-count-label {
+    max-width: 0;
+    opacity: 0;
+    /* cancels one of the two .selection-info gaps now sitting side by side */
+    margin-right: -0.375rem;
+  }
+}
+
+/* ~530px -- the narrowest the column can be dragged */
+@container bulkbar (max-width: 600px) {
+  .bulk-label-full {
+    display: none;
+  }
+
+  .bulk-label-short {
+    display: inline;
+  }
 }
 
 .toolbar-select {
@@ -1981,7 +2199,12 @@ input[type="text"]:focus {
 .search-icon-large {
   color: var(--text-secondary);
   font-size: 1.5rem !important;
+  margin-left: 0.25rem;
   margin-right: 0.75rem;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .main-search-input {

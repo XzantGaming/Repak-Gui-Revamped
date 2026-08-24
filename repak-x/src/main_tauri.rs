@@ -23,7 +23,7 @@ mod utils;
 mod utoc_utils;
 mod vfx_updater;
 
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use regex_lite::Regex;
 use serde::{Deserialize, Serialize};
@@ -362,15 +362,21 @@ async fn save_app_settings(
     state.enable_drp = settings.enable_drp;
     state.launcher_type = settings.launcher_type;
 
-    // Apply DRP immediately
+    // Apply DRP immediately. The connect handshake can block for a while
+    // (see discord_presence::connect), and this command's caller awaits the
+    // result to know the setting was saved - so run it in the background
+    // instead of stalling the Settings save on it.
     if state.enable_drp {
-        if !discord.manager.is_connected() {
-            if let Err(e) = discord.manager.connect() {
-                warn!("Failed to connect Discord RPC: {}", e);
+        let manager = discord.manager.clone();
+        let theme_name = state.accent_color.clone();
+        std::thread::spawn(move || {
+            if !manager.is_connected() {
+                if let Err(e) = manager.connect() {
+                    warn!("Failed to connect Discord RPC: {}", e);
+                }
             }
-        }
-        let theme_name = state.accent_color.as_str();
-        discord.manager.set_theme(theme_name);
+            manager.set_theme(&theme_name);
+        });
     } else {
         if discord.manager.is_connected() {
             if let Err(e) = discord.manager.disconnect() {
@@ -417,15 +423,6 @@ async fn get_game_path(state: State<'_, Arc<Mutex<AppState>>>) -> Result<String,
 async fn set_game_path(path: String, state: State<'_, Arc<Mutex<AppState>>>) -> Result<(), String> {
     let mods_path = PathBuf::from(&path);
 
-    // Auto-deploy bundled LOD Disabler mod if path exists
-    if mods_path.exists() {
-        match deploy_bundled_lod_mod(&mods_path) {
-            Ok(true) => info!("Auto-deployed bundled LOD Disabler mod"),
-            Ok(false) => info!("Bundled LOD Disabler mod already present or not bundled"),
-            Err(e) => warn!("Failed to auto-deploy LOD Disabler mod: {}", e),
-        }
-    }
-
     let mut state = state.lock().unwrap();
     state.game_path = mods_path;
     save_state(&state).map_err(|e| e.to_string())?;
@@ -449,13 +446,6 @@ async fn auto_detect_game_path(
                     toast_events::emit_game_path_failed(&window, &error_msg);
                     return Err(error_msg);
                 }
-            }
-
-            // Auto-deploy bundled LOD Disabler mod
-            match deploy_bundled_lod_mod(&mods_path) {
-                Ok(true) => info!("Auto-deployed bundled LOD Disabler mod"),
-                Ok(false) => info!("Bundled LOD Disabler mod already present or not bundled"),
-                Err(e) => warn!("Failed to auto-deploy LOD Disabler mod: {}", e),
             }
 
             let mut state = state.lock().unwrap();
@@ -1766,15 +1756,31 @@ struct ModToInstall {
 }
 
 /// Helper function to copy an IoStore bundle (.utoc/.ucas and .pak or .bak_repak) and recompress if needed
+/// `rename_stem`, when set, is the new base name for every file in the bundle.
+/// The .pak/.utoc/.ucas of one IoStore bundle must always share a stem, which is
+/// the same rule `rename_mod` follows when renaming an installed mod.
 fn copy_iostore_with_compression_check(
     utoc_src: &Path,
     output_dir: &Path,
     window: &Window,
+    rename_stem: Option<&str>,
 ) -> Result<u32, String> {
     let utoc_name = utoc_src.file_name().unwrap();
     let ucas_src = utoc_src.with_extension("ucas");
-    let utoc_dest = output_dir.join(utoc_name);
-    let ucas_dest = output_dir.join(ucas_src.file_name().unwrap());
+
+    // Destination file names, honouring the rename when one was requested
+    let dest_name = |src: &Path| -> PathBuf {
+        match rename_stem {
+            Some(stem) => {
+                let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("");
+                output_dir.join(format!("{}.{}", stem, ext))
+            }
+            None => output_dir.join(src.file_name().unwrap()),
+        }
+    };
+
+    let utoc_dest = dest_name(utoc_src);
+    let ucas_dest = dest_name(&ucas_src);
 
     let mut file_count = 0u32;
 
@@ -1784,7 +1790,7 @@ fn copy_iostore_with_compression_check(
 
     // Copy .pak if it exists
     if pak_src.exists() {
-        let pak_dest = output_dir.join(pak_src.file_name().unwrap());
+        let pak_dest = dest_name(&pak_src);
         if let Err(e) = std::fs::copy(&pak_src, &pak_dest) {
             warn!(
                 "[QuickOrganize] Failed to copy {}: {}",
@@ -1809,7 +1815,7 @@ fn copy_iostore_with_compression_check(
 
     // Copy .bak_repak if it exists (disabled pak file)
     if bak_repak_src.exists() {
-        let bak_repak_dest = output_dir.join(bak_repak_src.file_name().unwrap());
+        let bak_repak_dest = dest_name(&bak_repak_src);
         if let Err(e) = std::fs::copy(&bak_repak_src, &bak_repak_dest) {
             warn!(
                 "[QuickOrganize] Failed to copy {}: {}",
@@ -1969,14 +1975,253 @@ fn get_clean_base_name(filename: &str) -> String {
     base_no_p.to_string()
 }
 
+/// One ready-to-install mod found inside an archive, directory, or loose file.
+/// A "mod" is one stem in one directory: the .pak plus any .utoc/.ucas siblings.
+#[derive(serde::Serialize, Clone, Debug)]
+struct ArchiveModEntry {
+    /// Path relative to the archive/directory root, forward-slashed.
+    /// This is the key the install side uses for selection and renaming.
+    rel_path: String,
+    /// Parent directory inside the archive, "" when at the root.
+    rel_dir: String,
+    /// File name without extension - the editable part when renaming.
+    base_name: String,
+    is_iostore: bool,
+    size: u64,
+    mod_type: String,
+    /// 4-digit hero ids detected from the asset paths, so the panel can show
+    /// the same portraits the mod list uses.
+    hero_ids: Vec<String>,
+}
+
+/// List the installable mods inside an archive (or a directory / loose pak)
+/// WITHOUT installing anything, so the user can pick and rename before committing.
+#[tauri::command]
+async fn inspect_archive_mods(path: String, window: Window) -> Result<Vec<ArchiveModEntry>, String> {
+    use crate::install_mod::install_mod_logic::archives::{extract_7z, extract_rar, extract_zip};
+    use walkdir::WalkDir;
+
+    let src = PathBuf::from(&path);
+    if !src.exists() {
+        return Err(format!("Path does not exist: {}", path));
+    }
+
+    let ext = src
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    // Loose pak / IoStore bundle: a single entry, nothing to extract.
+    if ext == "pak" || ext == "utoc" {
+        let stem = src
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Unknown")
+            .to_string();
+        let utoc = src.with_extension("utoc");
+        let ucas = src.with_extension("ucas");
+        let is_iostore = utoc.exists() && ucas.exists();
+        let size = bundle_size(&src);
+        let (mod_type, hero_ids) = detect_mod_info(&src, is_iostore);
+
+        return Ok(vec![ArchiveModEntry {
+            rel_path: src
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+            rel_dir: String::new(),
+            base_name: stem,
+            is_iostore,
+            size,
+            mod_type,
+            hero_ids,
+        }]);
+    }
+
+    // Archives are extracted to a temp dir purely for inspection; the install
+    // side re-extracts from the original archive when the user confirms.
+    let scan_root: PathBuf;
+    let _temp_guard;
+    if ext == "zip" || ext == "rar" || ext == "7z" {
+        let temp_dir = tempfile::tempdir().map_err(|e| format!("Failed to create temp dir: {}", e))?;
+        let temp_path = temp_dir.path().to_path_buf();
+        let temp_path_str = temp_path.to_str().unwrap_or_default();
+        let src_str = src.to_str().unwrap_or_default();
+
+        let extract_result = if ext == "zip" {
+            extract_zip(src_str, temp_path_str)
+        } else if ext == "rar" {
+            extract_rar(src_str, temp_path_str)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        } else {
+            extract_7z(src_str, temp_path_str)
+        };
+
+        extract_result.map_err(|e| format!("Failed to extract archive: {}", e))?;
+
+        scan_root = temp_path;
+        _temp_guard = Some(temp_dir);
+    } else if src.is_dir() {
+        scan_root = src.clone();
+        _temp_guard = None;
+    } else {
+        return Ok(Vec::new());
+    }
+
+    let mut entries: Vec<ArchiveModEntry> = Vec::new();
+    let mut seen_stems: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+
+    for entry in WalkDir::new(&scan_root).into_iter().filter_map(|e| e.ok()) {
+        let entry_path = entry.path();
+        let entry_ext = entry_path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        // Anchor on the .pak; fall back to .utoc for IoStore-only bundles so a
+        // bundle without a .pak still shows up exactly once.
+        let is_anchor = entry_ext == "pak"
+            || (entry_ext == "utoc" && !entry_path.with_extension("pak").exists());
+        if !is_anchor {
+            continue;
+        }
+
+        // One entry per stem+directory, whichever extension we hit first.
+        let stem_key = entry_path.with_extension("");
+        if !seen_stems.insert(stem_key) {
+            continue;
+        }
+
+        let rel = entry_path.strip_prefix(&scan_root).unwrap_or(entry_path);
+        let rel_path = rel.to_string_lossy().replace('\\', "/");
+        let rel_dir = rel
+            .parent()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+
+        let utoc = entry_path.with_extension("utoc");
+        let ucas = entry_path.with_extension("ucas");
+        let is_iostore = utoc.exists() && ucas.exists();
+
+        let (mod_type, hero_ids) = detect_mod_info(entry_path, is_iostore);
+
+        entries.push(ArchiveModEntry {
+            rel_path,
+            rel_dir,
+            base_name: entry_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Unknown")
+                .to_string(),
+            is_iostore,
+            size: bundle_size(entry_path),
+            mod_type,
+            hero_ids,
+        });
+    }
+
+    entries.sort_by(|a, b| a.rel_path.to_lowercase().cmp(&b.rel_path.to_lowercase()));
+
+    let _ = window.emit(
+        "install_log",
+        format!("[Inspect] Found {} mod(s) in {}", entries.len(), path),
+    );
+
+    Ok(entries)
+}
+
+/// Total bytes of a mod bundle (the anchor file plus its IoStore companions).
+fn bundle_size(anchor: &Path) -> u64 {
+    ["pak", "utoc", "ucas"]
+        .iter()
+        .filter_map(|ext| std::fs::metadata(anchor.with_extension(ext)).ok())
+        .map(|m| m.len())
+        .sum()
+}
+
+/// Best-effort content classification plus hero detection, from one read of the
+/// bundle's asset list. Mirrors what `parse_dropped_files` reports for the type,
+/// and `utils/heroes.ts` for the hero ids.
+fn detect_mod_info(anchor: &Path, is_iostore: bool) -> (String, Vec<String>) {
+    use crate::utils::get_pak_characteristics_detailed;
+
+    let files: Option<Vec<String>> = if is_iostore {
+        use crate::utoc_utils::read_utoc;
+        let utoc_files: Vec<String> = read_utoc(&anchor.with_extension("utoc"))
+            .iter()
+            .map(|e| e.file_path.clone())
+            .collect();
+        if utoc_files.is_empty() {
+            None
+        } else {
+            Some(utoc_files)
+        }
+    } else {
+        let pak = anchor.with_extension("pak");
+        uasset_toolkit::list_pak_files(
+            pak.to_str().unwrap_or_default(),
+            Some(crate::install_mod::AES_KEY_HEX),
+        )
+        .ok()
+        .filter(|f| !f.is_empty())
+    };
+
+    let Some(files) = files else {
+        return ("Unknown".to_string(), Vec::new());
+    };
+
+    let mod_type = get_pak_characteristics_detailed(files.clone()).mod_type;
+    (mod_type, detect_hero_ids(&files))
+}
+
+/// Hero ids from asset paths. Same two patterns as `detectHeroes` in
+/// utils/heroes.ts: the path form wins, and short-circuits the filename form to
+/// avoid false positives from shared assets.
+fn detect_hero_ids(files: &[String]) -> Vec<String> {
+    let path_re = match Regex::new(r"(?:Characters|Hero_ST|Hero)/(\d{4})") {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    let name_re = match Regex::new(r"[_/](10[1-6]\d)\d{3}") {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut ids: Vec<String> = Vec::new();
+    for file in files {
+        let found = path_re
+            .captures(file)
+            .or_else(|| name_re.captures(file))
+            .map(|c| c[1].to_string());
+        if let Some(id) = found {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+    }
+    ids
+}
+
 /// Quick Organize: Simply copy/move files to a target folder without any repak processing
 /// This is for organizing existing mod files into subfolders
 /// Now also detects uncompressed IoStore bundles and recompresses them with Oodle
 /// Preserves subfolder structure from archives and directories
+///
+/// `selections`, `renames` and `flatten` are optional so existing callers keep
+/// their behaviour: install everything, keep original names, retain structure.
+///   - `selections`: rel_paths (as reported by `inspect_archive_mods`) to install.
+///   - `renames`: rel_path -> new base name, applied to the whole bundle.
+///   - `flatten`: drop the archive's internal folders and install side by side.
 #[tauri::command]
 async fn quick_organize(
     paths: Vec<String>,
     target_folder: String,
+    selections: Option<Vec<String>>,
+    renames: Option<std::collections::HashMap<String, String>>,
+    flatten: Option<bool>,
     state: State<'_, Arc<Mutex<AppState>>>,
     window: Window,
 ) -> Result<i32, String> {
@@ -2003,6 +2248,37 @@ async fn quick_organize(
             output_dir.display()
         );
     }
+
+    // Resolve the optional install options into their defaults.
+    let flatten = flatten.unwrap_or(false);
+    let selections: Option<std::collections::HashSet<String>> =
+        selections.map(|v| v.into_iter().collect());
+    let renames = renames.unwrap_or_default();
+
+    // The key for an entry, matching what `inspect_archive_mods` reported: a
+    // bundle is identified by its .pak when it has one, otherwise its .utoc, so
+    // the .pak and .utoc branches below agree on a single key per bundle.
+    let entry_key = |entry_path: &Path, base_path: &Path| -> String {
+        let pak = entry_path.with_extension("pak");
+        let anchor = if pak.exists() {
+            pak
+        } else {
+            entry_path.to_path_buf()
+        };
+        anchor
+            .strip_prefix(base_path)
+            .unwrap_or(&anchor)
+            .to_string_lossy()
+            .replace('\\', "/")
+    };
+
+    let is_selected = |key: &str| -> bool {
+        match &selections {
+            // None means "no selection was made", i.e. install everything
+            None => true,
+            Some(set) => set.contains(key),
+        }
+    };
 
     let mut cleaned_bases = std::collections::HashSet::new();
 
@@ -2078,43 +2354,6 @@ async fn quick_organize(
             .and_then(|parent| parent.strip_prefix(base_path).ok())
             .map(|rel| rel.to_path_buf())
             .filter(|rel| !rel.as_os_str().is_empty())
-    }
-
-    /// Helper to ensure destination directory exists and return the full destination path
-    fn prepare_dest_with_subfolders(
-        entry_path: &Path,
-        base_path: &Path,
-        output_dir: &Path,
-        window: &Window,
-    ) -> Result<PathBuf, String> {
-        let file_name = entry_path.file_name().unwrap();
-
-        if let Some(rel_subpath) = get_relative_subpath(entry_path, base_path) {
-            let dest_subdir = output_dir.join(&rel_subpath);
-            if !dest_subdir.exists() {
-                std::fs::create_dir_all(&dest_subdir).map_err(|e| {
-                    format!(
-                        "Failed to create subfolder '{}': {}",
-                        rel_subpath.display(),
-                        e
-                    )
-                })?;
-                info!(
-                    "[QuickOrganize] Created subfolder: {}",
-                    rel_subpath.display()
-                );
-                let _ = window.emit(
-                    "install_log",
-                    format!(
-                        "[QuickOrganize] Created subfolder: {}",
-                        rel_subpath.display()
-                    ),
-                );
-            }
-            Ok(dest_subdir.join(file_name))
-        } else {
-            Ok(output_dir.join(file_name))
-        }
     }
 
     /// Helper to get the destination directory for IoStore bundles with subfolder preservation
@@ -2204,31 +2443,44 @@ async fn quick_organize(
                 let entry_path = entry.path();
                 if let Some(entry_ext) = entry_path.extension().and_then(|s| s.to_str()) {
                     if entry_ext == "pak" {
-                        // Prepare destination with subfolder structure
-                        let dest = match prepare_dest_with_subfolders(
-                            entry_path,
-                            temp_path,
-                            &output_dir,
-                            &window,
-                        ) {
-                            Ok(d) => d,
-                            Err(e) => {
-                                error!("[QuickOrganize] {}", e);
-                                let _ = window
-                                    .emit("install_log", format!("[QuickOrganize] ERROR: {}", e));
-                                continue;
+                        let key = entry_key(entry_path, temp_path);
+                        if !is_selected(&key) {
+                            continue;
+                        }
+
+                        // Flatten drops the archive's internal folders
+                        let dest_dir = if flatten {
+                            output_dir.clone()
+                        } else {
+                            match get_iostore_dest_dir(
+                                entry_path,
+                                temp_path,
+                                &output_dir,
+                                &window,
+                            ) {
+                                Ok(d) => d,
+                                Err(e) => {
+                                    error!("[QuickOrganize] {}", e);
+                                    let _ = window.emit(
+                                        "install_log",
+                                        format!("[QuickOrganize] ERROR: {}", e),
+                                    );
+                                    continue;
+                                }
                             }
                         };
 
-                        let file_name_str = entry_path
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_str()
-                            .unwrap_or("");
-                        cleanup_conflicting_mods(
-                            dest.parent().unwrap_or(&output_dir),
-                            file_name_str,
-                        );
+                        let file_name_str = match renames.get(&key) {
+                            Some(stem) => format!("{}.pak", stem),
+                            None => entry_path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string(),
+                        };
+                        let dest = dest_dir.join(&file_name_str);
+
+                        cleanup_conflicting_mods(&dest_dir, &file_name_str);
 
                         if let Err(e) = std::fs::copy(entry_path, &dest) {
                             error!(
@@ -2251,33 +2503,46 @@ async fn quick_organize(
                         if ucas_path.exists() && !processed_utocs.contains(entry_path) {
                             processed_utocs.insert(entry_path.to_path_buf());
 
-                            // Determine destination directory with subfolder preservation
-                            let dest_dir = match get_iostore_dest_dir(
-                                entry_path,
-                                temp_path,
-                                &output_dir,
-                                &window,
-                            ) {
-                                Ok(d) => d,
-                                Err(e) => {
-                                    error!("[QuickOrganize] {}", e);
-                                    let _ = window.emit(
-                                        "install_log",
-                                        format!("[QuickOrganize] ERROR: {}", e),
-                                    );
-                                    continue;
+                            let key = entry_key(entry_path, temp_path);
+                            if !is_selected(&key) {
+                                continue;
+                            }
+                            let rename = renames.get(&key).map(|s| s.as_str());
+
+                            // Flatten drops the archive's internal folders
+                            let dest_dir = if flatten {
+                                output_dir.clone()
+                            } else {
+                                match get_iostore_dest_dir(
+                                    entry_path,
+                                    temp_path,
+                                    &output_dir,
+                                    &window,
+                                ) {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        error!("[QuickOrganize] {}", e);
+                                        let _ = window.emit(
+                                            "install_log",
+                                            format!("[QuickOrganize] ERROR: {}", e),
+                                        );
+                                        continue;
+                                    }
                                 }
                             };
 
-                            let file_name_str = entry_path
-                                .file_name()
-                                .unwrap_or_default()
-                                .to_str()
-                                .unwrap_or("");
-                            cleanup_conflicting_mods(&dest_dir, file_name_str);
+                            let file_name_str = match rename {
+                                Some(stem) => format!("{}.utoc", stem),
+                                None => entry_path
+                                    .file_name()
+                                    .unwrap_or_default()
+                                    .to_string_lossy()
+                                    .to_string(),
+                            };
+                            cleanup_conflicting_mods(&dest_dir, &file_name_str);
 
                             match copy_iostore_with_compression_check(
-                                entry_path, &dest_dir, &window,
+                                entry_path, &dest_dir, &window, rename,
                             ) {
                                 Ok(count) => copied_count += count as i32,
                                 Err(e) => {
@@ -2296,26 +2561,28 @@ async fn quick_organize(
         }
         // Handle pak files (and their iostore companions) - no subfolder structure for single files
         else if ext == "pak" {
-            let file_name = path.file_name().unwrap();
-            let dest = output_dir.join(file_name);
+            // A loose file is keyed by its own name, and has no structure to flatten
+            let orig_name = path.file_name().unwrap().to_string_lossy().to_string();
+            let rename = renames.get(&orig_name).map(|s| s.as_str());
 
-            let file_name_str = file_name.to_str().unwrap_or("");
-            cleanup_conflicting_mods(&output_dir, file_name_str);
+            let file_name_str = match rename {
+                Some(stem) => format!("{}.pak", stem),
+                None => orig_name.clone(),
+            };
+            let dest = output_dir.join(&file_name_str);
+
+            cleanup_conflicting_mods(&output_dir, &file_name_str);
 
             // Copy the pak file
             if let Err(e) = std::fs::copy(&path, &dest) {
-                error!(
-                    "[QuickOrganize] Failed to copy {}: {}",
-                    file_name.to_string_lossy(),
-                    e
-                );
+                error!("[QuickOrganize] Failed to copy {}: {}", file_name_str, e);
                 continue;
             }
 
-            info!("[QuickOrganize] Copied: {}", file_name.to_string_lossy());
+            info!("[QuickOrganize] Copied: {}", file_name_str);
             let _ = window.emit(
                 "install_log",
-                format!("[QuickOrganize] Copied: {}", file_name.to_string_lossy()),
+                format!("[QuickOrganize] Copied: {}", file_name_str),
             );
             copied_count += 1;
 
@@ -2324,7 +2591,8 @@ async fn quick_organize(
             let ucas_path = path.with_extension("ucas");
 
             if utoc_path.exists() && ucas_path.exists() {
-                match copy_iostore_with_compression_check(&utoc_path, &output_dir, &window) {
+                match copy_iostore_with_compression_check(&utoc_path, &output_dir, &window, rename)
+                {
                     Ok(count) => copied_count += count as i32,
                     Err(e) => {
                         error!("[QuickOrganize] Failed to process IoStore: {}", e);
@@ -2332,13 +2600,12 @@ async fn quick_organize(
                     }
                 }
             } else if utoc_path.exists() {
-                let utoc_name = utoc_path.file_name().unwrap();
-                if let Err(e) = std::fs::copy(&utoc_path, output_dir.join(utoc_name)) {
-                    error!(
-                        "[QuickOrganize] Failed to copy {}: {}",
-                        utoc_name.to_string_lossy(),
-                        e
-                    );
+                let utoc_name = match rename {
+                    Some(stem) => format!("{}.utoc", stem),
+                    None => utoc_path.file_name().unwrap().to_string_lossy().to_string(),
+                };
+                if let Err(e) = std::fs::copy(&utoc_path, output_dir.join(&utoc_name)) {
+                    error!("[QuickOrganize] Failed to copy {}: {}", utoc_name, e);
                 } else {
                     copied_count += 1;
                 }
@@ -2348,10 +2615,19 @@ async fn quick_organize(
         else if ext == "utoc" {
             let ucas_path = path.with_extension("ucas");
             if ucas_path.exists() {
-                let file_name_str = path.file_name().unwrap_or_default().to_str().unwrap_or("");
-                cleanup_conflicting_mods(&output_dir, file_name_str);
+                let orig_name = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                let rename = renames.get(&orig_name).map(|s| s.as_str());
+                let file_name_str = match rename {
+                    Some(stem) => format!("{}.utoc", stem),
+                    None => orig_name.clone(),
+                };
+                cleanup_conflicting_mods(&output_dir, &file_name_str);
 
-                match copy_iostore_with_compression_check(&path, &output_dir, &window) {
+                match copy_iostore_with_compression_check(&path, &output_dir, &window, rename) {
                     Ok(count) => copied_count += count as i32,
                     Err(e) => {
                         error!("[QuickOrganize] Failed to process IoStore: {}", e);
@@ -2369,31 +2645,39 @@ async fn quick_organize(
                 let entry_path = entry.path();
                 if let Some(entry_ext) = entry_path.extension().and_then(|s| s.to_str()) {
                     if entry_ext == "pak" {
-                        // Prepare destination with subfolder structure
-                        let dest = match prepare_dest_with_subfolders(
-                            entry_path,
-                            &path,
-                            &output_dir,
-                            &window,
-                        ) {
-                            Ok(d) => d,
-                            Err(e) => {
-                                error!("[QuickOrganize] {}", e);
-                                let _ = window
-                                    .emit("install_log", format!("[QuickOrganize] ERROR: {}", e));
-                                continue;
+                        let key = entry_key(entry_path, &path);
+                        if !is_selected(&key) {
+                            continue;
+                        }
+
+                        // Flatten drops the source folder's internal structure
+                        let dest_dir = if flatten {
+                            output_dir.clone()
+                        } else {
+                            match get_iostore_dest_dir(entry_path, &path, &output_dir, &window) {
+                                Ok(d) => d,
+                                Err(e) => {
+                                    error!("[QuickOrganize] {}", e);
+                                    let _ = window.emit(
+                                        "install_log",
+                                        format!("[QuickOrganize] ERROR: {}", e),
+                                    );
+                                    continue;
+                                }
                             }
                         };
 
-                        let file_name_str = entry_path
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_str()
-                            .unwrap_or("");
-                        cleanup_conflicting_mods(
-                            dest.parent().unwrap_or(&output_dir),
-                            file_name_str,
-                        );
+                        let file_name_str = match renames.get(&key) {
+                            Some(stem) => format!("{}.pak", stem),
+                            None => entry_path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string(),
+                        };
+                        let dest = dest_dir.join(&file_name_str);
+
+                        cleanup_conflicting_mods(&dest_dir, &file_name_str);
 
                         if let Err(e) = std::fs::copy(entry_path, &dest) {
                             error!(
@@ -2416,8 +2700,16 @@ async fn quick_organize(
                         if ucas_path.exists() && !processed_utocs.contains(entry_path) {
                             processed_utocs.insert(entry_path.to_path_buf());
 
-                            // Determine destination directory with subfolder preservation
-                            let dest_dir =
+                            let key = entry_key(entry_path, &path);
+                            if !is_selected(&key) {
+                                continue;
+                            }
+                            let rename = renames.get(&key).map(|s| s.as_str());
+
+                            // Flatten drops the source folder's internal structure
+                            let dest_dir = if flatten {
+                                output_dir.clone()
+                            } else {
                                 match get_iostore_dest_dir(entry_path, &path, &output_dir, &window)
                                 {
                                     Ok(d) => d,
@@ -2429,17 +2721,21 @@ async fn quick_organize(
                                         );
                                         continue;
                                     }
-                                };
+                                }
+                            };
 
-                            let file_name_str = entry_path
-                                .file_name()
-                                .unwrap_or_default()
-                                .to_str()
-                                .unwrap_or("");
-                            cleanup_conflicting_mods(&dest_dir, file_name_str);
+                            let file_name_str = match rename {
+                                Some(stem) => format!("{}.utoc", stem),
+                                None => entry_path
+                                    .file_name()
+                                    .unwrap_or_default()
+                                    .to_string_lossy()
+                                    .to_string(),
+                            };
+                            cleanup_conflicting_mods(&dest_dir, &file_name_str);
 
                             match copy_iostore_with_compression_check(
-                                entry_path, &dest_dir, &window,
+                                entry_path, &dest_dir, &window, rename,
                             ) {
                                 Ok(count) => copied_count += count as i32,
                                 Err(e) => {
@@ -5010,128 +5306,6 @@ async fn toggle_sig_bypasser(state: State<'_, Arc<Mutex<AppState>>>) -> Result<S
     }
 }
 
-// ============================================================================
-// BUNDLED LOD DISABLER MOD
-// ============================================================================
-
-/// The bundled LOD Disabler mod bytes (embedded at compile time)
-/// This mod must stay as legacy PAK and NOT be converted to IoStore
-///
-/// To bundle the mod:
-/// 1. Download from https://www.nexusmods.com/marvelrivals/mods/5303
-/// 2. Place the .pak file at: repak-gui/src/bundled_mods/SK_LODs_Disabler_9999999_P.pak
-/// 3. Rebuild the application with --features bundled_lod_mod
-#[cfg(feature = "bundled_lod_mod")]
-const BUNDLED_LOD_DISABLER_PAK: &[u8] =
-    include_bytes!("bundled_mods/SK_LODs_Disabler_9999999_P.pak");
-
-/// Folder name for the bundled LOD mod
-const LOD_DISABLER_FOLDER: &str = "_LOD-Disabler (Built-in)";
-
-/// Filename for the bundled LOD mod
-const LOD_DISABLER_FILENAME: &str = "SK_LODs_Disabler_9999999_P.pak";
-
-/// Get the bundled LOD mod bytes if available
-fn get_bundled_lod_mod_bytes() -> Option<&'static [u8]> {
-    #[cfg(feature = "bundled_lod_mod")]
-    {
-        Some(BUNDLED_LOD_DISABLER_PAK)
-    }
-    #[cfg(not(feature = "bundled_lod_mod"))]
-    {
-        None
-    }
-}
-
-/// Deploy the bundled LOD Disabler mod to the game's mods folder
-/// Creates a special folder and copies the pak file there
-/// Returns Ok(true) if deployed, Ok(false) if already exists or not bundled, Err on failure
-fn deploy_bundled_lod_mod(mods_path: &Path) -> Result<bool, String> {
-    // Check if bundled mod is available
-    let pak_bytes = match get_bundled_lod_mod_bytes() {
-        Some(bytes) => bytes,
-        None => {
-            info!("Bundled LOD Disabler mod not included in this build");
-            return Ok(false);
-        }
-    };
-
-    let lod_folder = mods_path.join(LOD_DISABLER_FOLDER);
-    let pak_path = lod_folder.join(LOD_DISABLER_FILENAME);
-
-    // Check if already deployed
-    if pak_path.exists() {
-        info!(
-            "Bundled LOD Disabler mod already deployed at: {}",
-            pak_path.display()
-        );
-        return Ok(false);
-    }
-
-    // Create the folder
-    std::fs::create_dir_all(&lod_folder)
-        .map_err(|e| format!("Failed to create LOD Disabler folder: {}", e))?;
-
-    // Write the bundled pak file
-    std::fs::write(&pak_path, pak_bytes)
-        .map_err(|e| format!("Failed to write LOD Disabler pak: {}", e))?;
-
-    info!(
-        "Deployed bundled LOD Disabler mod to: {}",
-        pak_path.display()
-    );
-    Ok(true)
-}
-
-/// Check if the bundled LOD Disabler mod is deployed
-#[tauri::command]
-async fn check_lod_disabler_deployed(
-    state: State<'_, Arc<Mutex<AppState>>>,
-) -> Result<bool, String> {
-    let mods_path = {
-        let state = state.lock().unwrap();
-        state.game_path.clone()
-    };
-
-    if !mods_path.exists() {
-        return Ok(false);
-    }
-
-    let pak_path = mods_path
-        .join(LOD_DISABLER_FOLDER)
-        .join(LOD_DISABLER_FILENAME);
-    Ok(pak_path.exists())
-}
-
-/// Get the path to the bundled LOD Disabler mod
-#[tauri::command]
-async fn get_lod_disabler_path(state: State<'_, Arc<Mutex<AppState>>>) -> Result<String, String> {
-    let mods_path = {
-        let state = state.lock().unwrap();
-        state.game_path.clone()
-    };
-
-    let pak_path = mods_path
-        .join(LOD_DISABLER_FOLDER)
-        .join(LOD_DISABLER_FILENAME);
-    Ok(pak_path.to_string_lossy().to_string())
-}
-
-/// Manually deploy the bundled LOD Disabler mod
-#[tauri::command]
-async fn deploy_lod_disabler(state: State<'_, Arc<Mutex<AppState>>>) -> Result<bool, String> {
-    let mods_path = {
-        let state = state.lock().unwrap();
-        state.game_path.clone()
-    };
-
-    if !mods_path.exists() {
-        return Err("Game path does not exist. Please set a valid mods folder first.".to_string());
-    }
-
-    deploy_bundled_lod_mod(&mods_path)
-}
-
 /// Result of recompression operation
 #[derive(Clone, Serialize, Deserialize)]
 struct RecompressResult {
@@ -5432,6 +5606,99 @@ fn recompress_pak_file(pak_path: &Path) -> Result<u64, String> {
 #[tauri::command]
 async fn get_app_version() -> Result<String, String> {
     Ok(env!("CARGO_PKG_VERSION").to_string())
+}
+
+/// Delete the archive an extension install was sourced from, once it has been
+/// installed successfully.
+///
+/// The path originates from a `repakx://` deep link, so it is caller-controlled
+/// and must not be deleted on trust. Three guards apply:
+///   1. it must be a regular file, so a link cannot point at a directory;
+///   2. its extension must be one the extension flow actually handles, so a
+///      crafted link cannot reach arbitrary documents;
+///   3. it must live outside the game mods directory, so this can never delete
+///      a mod that is already installed.
+#[tauri::command]
+async fn delete_source_archive(
+    path: String,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<(), String> {
+    const DELETABLE_EXTENSIONS: [&str; 6] = ["zip", "rar", "7z", "pak", "utoc", "ucas"];
+
+    let target = PathBuf::from(&path);
+
+    if !target.is_file() {
+        return Err(format!("Not a file: {}", path));
+    }
+
+    let ext = target
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+        .to_lowercase();
+    if !DELETABLE_EXTENSIONS.contains(&ext.as_str()) {
+        return Err(format!("Refusing to delete a .{} file", ext));
+    }
+
+    let mods_dir = {
+        let guard = state.lock().unwrap();
+        guard.game_path.clone()
+    };
+
+    // Compare resolved paths so ".." or a symlink cannot smuggle the target
+    // into the mods folder undetected.
+    if let (Ok(resolved_target), Ok(resolved_mods)) =
+        (target.canonicalize(), mods_dir.canonicalize())
+    {
+        if resolved_target.starts_with(&resolved_mods) {
+            return Err(
+                "Refusing to delete a file inside the mods folder - that is an installed mod"
+                    .to_string(),
+            );
+        }
+    }
+
+    std::fs::remove_file(&target).map_err(|e| format!("Failed to delete {}: {}", path, e))?;
+    info!("[Extension] Deleted source archive: {}", path);
+    Ok(())
+}
+
+/// Where the "which version's changelog has been shown" marker lives.
+///
+/// This deliberately does NOT use localStorage. The webview's storage proved
+/// unreliable for at least one user - the changelog reopened on every launch
+/// because the marker never survived a restart - while the on-disk config the
+/// rest of the app uses persists fine for them. It is also plain text, so a user
+/// with no devtools can read and report it.
+fn last_seen_version_path() -> PathBuf {
+    let app_dir = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("Repak-X");
+    let _ = std::fs::create_dir_all(&app_dir);
+    app_dir.join("last_seen_version.txt")
+}
+
+#[tauri::command]
+async fn get_last_seen_version() -> Result<String, String> {
+    let path = last_seen_version_path();
+    match std::fs::read_to_string(&path) {
+        Ok(v) => Ok(v.trim().to_string()),
+        // Absent file is the normal first-run case, not an error
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(format!("Failed to read {}: {}", path.display(), e)),
+    }
+}
+
+/// Writes the marker and reads it back, so a silent write failure is reported
+/// as a failure rather than silently re-arming the changelog next launch.
+#[tauri::command]
+async fn set_last_seen_version(version: String) -> Result<bool, String> {
+    let path = last_seen_version_path();
+    std::fs::write(&path, version.trim())
+        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+    let written = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to verify {}: {}", path.display(), e))?;
+    Ok(written.trim() == version.trim())
 }
 
 /// Check for application updates and emit update_available event when found
@@ -6677,6 +6944,19 @@ fn setup_logging() {
         }
     };
 
+    // Buffered: simplelog takes a global lock and writes per log call, so an
+    // unbuffered File turned every line into its own syscall while holding that
+    // lock -- which also serialised the parallel mod scan on the logger.
+    let buffered_log_file = std::io::BufWriter::with_capacity(64 * 1024, final_log_file);
+
+    // The file sink used to run at Debug in every build, so release users paid
+    // the full cost of scan-time diagnostics. Debug detail stays in debug builds.
+    let file_level = if cfg!(debug_assertions) {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    };
+
     let _ = CombinedLogger::init(vec![
         TermLogger::new(
             log::LevelFilter::Info,
@@ -6684,8 +6964,16 @@ fn setup_logging() {
             TerminalMode::Mixed,
             ColorChoice::Auto,
         ),
-        WriteLogger::new(log::LevelFilter::Debug, Config::default(), final_log_file),
+        WriteLogger::new(file_level, Config::default(), buffered_log_file),
     ]);
+
+    // Buffering means a crash would otherwise drop the tail of the log, which is
+    // exactly the part worth having. Flush it before the default hook prints.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        log::logger().flush();
+        default_hook(info);
+    }));
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -6727,7 +7015,8 @@ async fn get_mod_details(
         let state_guard = state.lock().unwrap();
         if let Some((cached_mtime, cached_details)) = state_guard.mod_details_cache.get(&path) {
             if *cached_mtime == mtime {
-                info!("Cache hit for mod: {}", path.display());
+                // Once per mod, and a hit is the uninteresting case
+                debug!("Cache hit for mod: {}", path.display());
                 return Ok(cached_details.clone());
             } else {
                 info!("Cache stale for mod: {} (mtime changed)", path.display());
@@ -7680,23 +7969,31 @@ fn main() {
     // Initialize Discord Rich Presence manager
     let discord_manager = discord_presence::create_discord_manager();
 
-    // Check saved state to see if DRP should be enabled
+    // Check saved state to see if DRP should be enabled.
+    // The IPC handshake (`connect()`) does a blocking pipe read with no timeout,
+    // and Discord can delay/throttle that response (e.g. after rapid reconnects),
+    // so this runs on its own thread instead of the startup path - otherwise a
+    // slow handshake would delay the main window from ever appearing.
     {
         let state_guard = state.lock().unwrap();
         if state_guard.enable_drp {
-            if let Err(e) = discord_manager.connect() {
-                warn!("Failed to auto-connect Discord RPC: {}", e);
-            } else {
-                info!("Auto-connected Discord RPC from saved settings");
+            let discord_manager = discord_manager.clone();
+            let accent_color = state_guard.accent_color.clone();
+            std::thread::spawn(move || {
+                if let Err(e) = discord_manager.connect() {
+                    warn!("Failed to auto-connect Discord RPC: {}", e);
+                } else {
+                    info!("Auto-connected Discord RPC from saved settings");
 
-                // Apply saved theme
-                discord_manager.set_theme(state_guard.accent_color.as_str());
+                    // Apply saved theme
+                    discord_manager.set_theme(accent_color.as_str());
 
-                // Set initial activity
-                if let Err(e) = discord_manager.set_idle() {
-                    warn!("Failed to set initial Discord RPC activity: {}", e);
+                    // Set initial activity
+                    if let Err(e) = discord_manager.set_idle() {
+                        warn!("Failed to set initial Discord RPC activity: {}", e);
+                    }
                 }
-            }
+            });
         }
     }
 
@@ -7783,6 +8080,15 @@ fn main() {
                 }
             });
 
+            // Check for character database updates in the background, throttled
+            // to once per day so we don't hit GitHub on every launch.
+            let char_update_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Some(new_count) = character_data::check_for_update_on_launch().await {
+                    let _ = char_update_handle.emit("character_data_updated", new_count);
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -7796,6 +8102,10 @@ fn main() {
             parse_dropped_files,
             install_mods,
             quick_organize,
+            inspect_archive_mods,
+            get_last_seen_version,
+            set_last_seen_version,
+            delete_source_archive,
             delete_mod,
             update_mod,
             rename_mod,
@@ -7862,10 +8172,6 @@ fn main() {
             p2p_create_mod_pack_preview,
             p2p_validate_connection_string,
             p2p_hash_file,
-            // Bundled LOD Disabler commands
-            check_lod_disabler_deployed,
-            get_lod_disabler_path,
-            deploy_lod_disabler,
             // Discord Rich Presence commands
             discord_connect,
             discord_disconnect,

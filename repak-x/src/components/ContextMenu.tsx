@@ -27,7 +27,8 @@ type ContextMenuProps = {
   onNewTag: (callback: (tag: string) => void) => void
   onMoveTo: (folderId: string | null) => void
   onMoveFolderTo?: (newParentId: string | null) => void
-  onCreateFolder: (options?: { moveFolderId?: string; parentId?: string }) => void
+  /** `moveMods` asks the caller to move the acted-on mods into the new folder */
+  onCreateFolder: (options?: { moveFolderId?: string; parentId?: string; moveMods?: boolean }) => void
   folders: FolderRecord[]
   onDelete: () => void
   onToggle: () => void
@@ -41,9 +42,11 @@ type ContextMenuProps = {
   onDeleteTag?: (tag: string) => void
   gamePath?: string
   holdToDelete?: boolean
+  /** How many mods the action affects, when the clicked mod is part of a selection */
+  selectionCount?: number
 }
 
-const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onNewTag, onMoveTo, onMoveFolderTo, onCreateFolder, folders, onDelete, onToggle, onRename, onRenameFolder, onCheckConflicts, onUpdateMod, onSendToVfxUpdater, onExtractAssets, allTags, onDeleteTag, gamePath, holdToDelete = true }: ContextMenuProps) => {
+const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onNewTag, onMoveTo, onMoveFolderTo, onCreateFolder, folders, onDelete, onToggle, onRename, onRenameFolder, onCheckConflicts, onUpdateMod, onSendToVfxUpdater, onExtractAssets, allTags, onDeleteTag, gamePath, holdToDelete = true, selectionCount = 0 }: ContextMenuProps) => {
   const [isDeleting, setIsDeleting] = useState(false)
   const deleteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
@@ -63,41 +66,41 @@ const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onNewTag, onMove
     }
   }, [])
 
-  // Adjust position to prevent menu from going off-screen
-  // Using useLayoutEffect to run after DOM updates but before paint
+  // Adjust position to prevent menu from going off-screen.
+  //
+  // This measures synchronously inside useLayoutEffect, and deliberately does
+  // NOT defer to requestAnimationFrame: a setState made from an rAF callback is
+  // processed in a later task, so the browser paints the unclamped position
+  // first and the menu visibly jumps a frame later. Setting state here instead
+  // is flushed before paint, so the menu's first paint is already in place.
+  //
+  // No need to reset to {x, y} before measuring either -- only the menu's width
+  // and height are read, and neither depends on where it is currently placed.
   useLayoutEffect(() => {
-    // First reset to original position
-    setAdjustedPos({ x, y })
+    if (!menuRef.current) return
 
-    // Then measure and adjust in next frame
-    requestAnimationFrame(() => {
-      if (menuRef.current) {
-        const menuRect = menuRef.current.getBoundingClientRect()
-        const viewportHeight = window.innerHeight
-        const viewportWidth = window.innerWidth
+    const menuRect = menuRef.current.getBoundingClientRect()
+    const viewportHeight = window.innerHeight
+    const viewportWidth = window.innerWidth
 
-        let newY = y
-        let newX = x
+    let newY = y
+    let newX = x
 
-        // If menu would go below viewport, flip it to open above cursor
-        if (y + menuRect.height > viewportHeight - 10) {
-          newY = y - menuRect.height
-        }
+    // If menu would go below viewport, flip it to open above cursor
+    if (y + menuRect.height > viewportHeight - 10) {
+      newY = y - menuRect.height
+    }
 
-        // If menu would go off right edge, shift it left
-        if (x + menuRect.width > viewportWidth - 10) {
-          newX = viewportWidth - menuRect.width - 10
-        }
+    // If menu would go off right edge, shift it left
+    if (x + menuRect.width > viewportWidth - 10) {
+      newX = viewportWidth - menuRect.width - 10
+    }
 
-        // Ensure menu doesn't go above or to left of viewport
-        newY = Math.max(10, newY)
-        newX = Math.max(10, newX)
+    // Ensure menu doesn't go above or to left of viewport
+    newY = Math.max(10, newY)
+    newX = Math.max(10, newX)
 
-        if (newX !== x || newY !== y) {
-          setAdjustedPos({ x: newX, y: newY })
-        }
-      }
-    })
+    setAdjustedPos(prev => (prev.x === newX && prev.y === newY ? prev : { x: newX, y: newY }))
   }, [x, y])
 
   const handleDeleteDown = (e: React.MouseEvent) => {
@@ -146,38 +149,41 @@ const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onNewTag, onMove
     submenu.style.maxHeight = ''
     submenu.style.overflowY = ''
 
-    requestAnimationFrame(() => {
-      const triggerRect = trigger.getBoundingClientRect()
-      const subRect = submenu.getBoundingClientRect()
-      const vw = window.innerWidth
-      const vh = window.innerHeight
-      const margin = 10
+    // Measured synchronously for the same reason as the root menu: deferring to
+    // rAF lets the browser paint the clipped placement once before we correct
+    // it. getBoundingClientRect() forces a style + layout flush, so the reset
+    // above and the :hover rule that reveals the submenu are both applied by
+    // the time we read, and the overrides below land before the next paint.
+    const triggerRect = trigger.getBoundingClientRect()
+    const subRect = submenu.getBoundingClientRect()
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const margin = 10
 
-      // Vertical: flip up if bottom edge clips
-      if (subRect.bottom > vh - margin) {
-        const spaceAbove = triggerRect.bottom - margin
-        const spaceBelow = vh - triggerRect.top - margin
-        if (spaceAbove > spaceBelow) {
-          submenu.style.top = 'auto'
-          submenu.style.bottom = '-4px'
-          if (subRect.height > spaceAbove) {
-            submenu.style.maxHeight = `${spaceAbove}px`
-            submenu.style.overflowY = 'auto'
-          }
-        } else {
-          // Not enough room above either; cap height and scroll downward.
-          submenu.style.maxHeight = `${spaceBelow}px`
+    // Vertical: flip up if bottom edge clips
+    if (subRect.bottom > vh - margin) {
+      const spaceAbove = triggerRect.bottom - margin
+      const spaceBelow = vh - triggerRect.top - margin
+      if (spaceAbove > spaceBelow) {
+        submenu.style.top = 'auto'
+        submenu.style.bottom = '-4px'
+        if (subRect.height > spaceAbove) {
+          submenu.style.maxHeight = `${spaceAbove}px`
           submenu.style.overflowY = 'auto'
         }
+      } else {
+        // Not enough room above either; cap height and scroll downward.
+        submenu.style.maxHeight = `${spaceBelow}px`
+        submenu.style.overflowY = 'auto'
       }
+    }
 
-      // Horizontal: flip left if right edge clips
-      const projectedRight = triggerRect.right + subRect.width
-      if (projectedRight > vw - margin) {
-        submenu.style.left = 'auto'
-        submenu.style.right = '100%'
-      }
-    })
+    // Horizontal: flip left if right edge clips
+    const projectedRight = triggerRect.right + subRect.width
+    if (projectedRight > vw - margin) {
+      submenu.style.left = 'auto'
+      submenu.style.right = '100%'
+    }
   }
 
   if (folder) {
@@ -281,7 +287,7 @@ const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onNewTag, onMove
           onMouseLeave={handleDeleteUp}
         >
           <div className="danger-bg" />
-          <span style={{ position: 'relative', zIndex: 2 }}>{isDeleting ? 'Hold to delete...' : 'Delete Folder (Hold 2s)'}</span>
+          <span style={{ position: 'relative', zIndex: 2 }}>{!holdToDelete ? 'Delete Folder' : isDeleting ? 'Hold to delete...' : 'Delete Folder (Hold 2s)'}</span>
         </div>
       </div>
     )
@@ -327,9 +333,15 @@ const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onNewTag, onMove
       </div>
 
       <div className="context-menu-item submenu-trigger" onMouseEnter={handleSubmenuEnter}>
-        Move to...
+        {selectionCount > 1 ? `Move ${selectionCount} mods to...` : 'Move to...'}
+        {/* Same order as the folder submenu above: root first, then New Folder,
+            then the list. It used to trail the root entry after the list. */}
         <div className="submenu">
-          <div className="context-menu-item" onClick={() => { onCreateFolder(); onClose(); }}>
+          <div className="context-menu-item" onClick={() => { onMoveTo(null); onClose(); }}>
+            Root ({folders.find(f => f.is_root)?.name || '~mods'})
+          </div>
+          {/* Inside "Move to...", creating a folder must also perform the move */}
+          <div className="context-menu-item" onClick={() => { onCreateFolder({ moveMods: true }); onClose(); }}>
             + New Folder...
           </div>
           <div className="context-menu-separator" />
@@ -339,10 +351,6 @@ const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onNewTag, onMove
                 {f.name}
               </div>
             ))}
-          </div>
-          <div className="context-menu-separator" />
-          <div className="context-menu-item" onClick={() => { onMoveTo(null); onClose(); }}>
-            Root ({folders.find(f => f.is_root)?.name || '~mods'})
           </div>
         </div>
       </div>

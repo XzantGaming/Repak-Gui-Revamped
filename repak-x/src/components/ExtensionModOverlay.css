@@ -14,7 +14,7 @@
 
 .extension-panel {
     width: 100%;
-    max-width: 500px;
+    max-width: 880px;
     max-height: 80vh;
     background: var(--panel-bg);
     border: 1px solid var(--panel-border);
@@ -94,30 +94,49 @@
     color: var(--text-primary);
 }
 
-/* Content */
+/* Content: the two sections ARE the columns. `overflow: hidden` here is the
+   point of the layout -- each column scrolls itself, so there is never a third
+   scrollbar wrapping the other two. */
 .extension-content {
     flex: 1;
     min-height: 0;
     padding: 1.5rem;
-    overflow-y: auto;
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 1.25rem;
+    overflow: hidden;
 }
 
+/* Destination column: the tree takes whatever height is left */
 .folder-section {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: 0.4rem;
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
 }
 
-.section-header {
+/* App.css:524 declares a global `.section-header` at the same specificity, with
+   `margin-bottom: 1rem` and `justify-content: space-between`. The margin stacked
+   on top of the section gap (~22px instead of 6px), and space-between pushed the
+   icon away from its own label. Scoped here so both are actually reset.
+   Also keeps the accent-coloured svg from leaking into other panels that use
+   this very generic class name. */
+.extension-panel .section-header {
     display: flex;
+    flex: 0 0 auto;
     align-items: center;
+    justify-content: flex-start;
+    margin-bottom: 0;
     gap: 0.5rem;
     font-size: 0.9rem;
     font-weight: 500;
     color: var(--text-secondary);
 }
 
-.section-header svg {
+.extension-panel .section-header svg {
     font-size: 1.1rem;
     color: var(--accent-primary, #4a9eff);
 }
@@ -128,7 +147,10 @@
     display: flex;
     align-items: center;
     gap: 0.35rem;
-    padding: 0.35rem 0.65rem;
+    padding: 0.25rem 0.6rem;
+    /* The global `button` rule floors this at 36px, which stretched the header
+       row well past its text and read as extra space above the folder tree. */
+    min-height: 0;
     border-radius: 6px;
     border: 1px solid color-mix(in srgb, var(--accent-primary, #4a9eff), transparent 60%);
     background: color-mix(in srgb, var(--accent-primary, #4a9eff), transparent 90%);
@@ -158,7 +180,8 @@
     background: var(--bg-dark);
     border-radius: 10px;
     padding: 0.5rem;
-    max-height: 320px;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
 }
 
@@ -223,6 +246,7 @@
 
 /* Selected Hint */
 .selected-hint {
+    flex: 0 0 auto;
     margin-top: 0.75rem;
     padding: 0.6rem 1rem;
     background: color-mix(in srgb, var(--accent-primary, #4a9eff), transparent 88%);
@@ -337,5 +361,287 @@
 
     .extension-footer {
         padding: 1rem;
+    }
+}
+/* ---------------------------------------------------------------
+   Archive contents: pick which mods to install, and rename them
+   --------------------------------------------------------------- */
+
+/* Contents column. `flex: 0 1 auto` on the list rather than `1 1 auto`: with a
+   single mod it sizes to that one row instead of stretching into a tall empty
+   box, and with many it shrinks and scrolls. */
+.ext-mods-section {
+    display: flex;
+    flex-direction: column;
+    /* Header sits close to its list; the structure row below re-adds its own
+       breathing room so only the header/list pair is tightened. */
+    gap: 0.4rem;
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
+}
+
+.ext-select-actions {
+    margin-left: auto;
+    display: inline-flex;
+    gap: 0.35rem;
+}
+
+.ext-select-actions button {
+    padding: 0.2rem 0.55rem;
+    min-height: 0;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 5px;
+    border: 1px solid var(--panel-border);
+    background: var(--bg-darker);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.ext-select-actions button:hover {
+    color: var(--text-primary);
+    border-color: var(--accent-primary);
+}
+
+.ext-mod-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 4px;
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    background: var(--bg-darkest);
+}
+
+.ext-mod-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.45rem 0.5rem;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+    opacity: 0.55;
+}
+
+.ext-mod-row.checked {
+    opacity: 1;
+    background: var(--bg-darker);
+    border-color: var(--panel-border);
+}
+
+.ext-mod-row:hover {
+    background: var(--bg-dark);
+}
+
+.ext-mod-check {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+}
+
+.ext-mod-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ext-mod-name {
+    width: 100%;
+    min-width: 0;
+    padding: 0.25rem 0.45rem;
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    background: var(--bg-darkest);
+    border: 1px solid var(--panel-border);
+    border-radius: 5px;
+    outline: none;
+    transition: border-color 0.15s ease;
+}
+
+.ext-mod-name:focus {
+    border-color: var(--accent-primary);
+}
+
+.ext-mod-name:disabled {
+    background: transparent;
+    border-color: transparent;
+    cursor: not-allowed;
+}
+
+.ext-mod-name.invalid {
+    border-color: var(--danger);
+}
+
+.ext-mod-path {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    opacity: 0.75;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-left: 0.45rem;
+}
+
+.ext-mod-meta {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+}
+
+.ext-mod-tag {
+    padding: 1px 6px;
+    border-radius: 999px;
+    border: 1px solid var(--panel-border);
+    background: var(--bg-darker);
+    white-space: nowrap;
+}
+
+.ext-mod-size {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.ext-inspect-error,
+.ext-inspect-empty {
+    flex: 0 0 auto;
+    padding: 0.6rem 0.75rem;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    border: 1px solid var(--panel-border);
+    background: var(--bg-darkest);
+    color: var(--text-secondary);
+}
+
+.ext-inspect-error {
+    color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger), transparent 65%);
+}
+
+/* Post-install cleanup option */
+.ext-cleanup-row {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.35rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+}
+
+.ext-cleanup-row input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+}
+
+/* Retain vs flatten the archive's internal folders */
+.ext-structure-row {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    margin-top: 0.35rem;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.ext-structure-label {
+    margin-right: auto;
+}
+
+.ext-structure-toggle {
+    display: inline-flex;
+    gap: 3px;
+    padding: 3px;
+    border-radius: 7px;
+    border: 1px solid var(--panel-border);
+    background: var(--bg-darkest);
+}
+
+.ext-structure-toggle button {
+    padding: 0.25rem 0.7rem;
+    min-height: 0;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.ext-structure-toggle button:hover:not(.active) {
+    color: var(--text-primary);
+}
+
+.ext-structure-toggle button.active {
+    background: var(--panel-bg);
+    color: var(--text-primary);
+    border-color: var(--panel-border);
+}
+
+/* Hero portrait from path detection, standing in for a type badge */
+.ext-mod-hero {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    object-fit: cover;
+    background: var(--bg-darker);
+    border: 1px solid var(--panel-border);
+}
+
+.ext-mod-hero.placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    opacity: 0.6;
+    font-size: 0.9rem;
+}
+
+/* Below roughly two usable columns, fall back to the stacked layout. The caps
+   come back with it, since a stacked list with no cap would push the other
+   section out of view. */
+@media (max-width: 780px) {
+    .extension-content {
+        flex-direction: column;
+        gap: 1.5rem;
+        overflow-y: auto;
+    }
+
+    .ext-mods-section,
+    .folder-section {
+        flex: 0 0 auto;
+    }
+
+    .ext-mod-list {
+        max-height: 240px;
+    }
+
+    .extension-panel .folder-tree-container {
+        flex: 0 0 auto;
+        max-height: 320px;
     }
 }

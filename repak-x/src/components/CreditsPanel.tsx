@@ -58,7 +58,6 @@ const EARLY_ACCESS_TESTERS = [
     'amMatt',
     'Fubuki',
     'Genny',
-    'Hobby',
     'Tobi'
 ];
 
@@ -69,6 +68,10 @@ const EARLY_ACCESS_SPECIAL_THANKS: EarlyAccessSpecialThanks[] = [
     {
         name: 'Genny',
     }
+];
+
+const SUPPORTERS = [
+    'JellyBX'
 ];
 
 const SPECIAL_THANKS: Contributor[] = [
@@ -235,6 +238,17 @@ export default function CreditsPanel({ onClose, version }: CreditsPanelProps) {
                                     <span key={index} className="credits-tester-chip special" title={person.reason}>
                                         {person.name}
                                     </span>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Supporters */}
+                        <div className="credits-section">
+                            <h3 className="credits-section-title">Above and Beyond</h3>
+                            <p className="credits-testers-thanks">To those whose generosity keeps Repak X moving forward</p>
+                            <div className="credits-testers-grid">
+                                {SUPPORTERS.map((name, index) => (
+                                    <span key={index} className="credits-tester-chip special">{name}</span>
                                 ))}
                             </div>
                         </div>

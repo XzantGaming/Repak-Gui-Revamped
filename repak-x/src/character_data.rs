@@ -784,6 +784,81 @@ where
 }
 
 // ============================================================================
+// AUTO-UPDATE ON LAUNCH (throttled to once per day)
+// ============================================================================
+
+use std::time::{SystemTime, UNIX_EPOCH};
+
+const AUTO_UPDATE_CHECK_INTERVAL_SECS: u64 = 24 * 60 * 60;
+
+fn last_check_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("Repak-X")
+        .join("character_data_last_check.txt")
+}
+
+fn read_last_check_time() -> Option<u64> {
+    fs::read_to_string(last_check_path())
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+}
+
+fn write_last_check_time() {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let _ = fs::write(last_check_path(), now.to_string());
+}
+
+fn should_check_for_update() -> bool {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    match read_last_check_time() {
+        Some(last) => now.saturating_sub(last) >= AUTO_UPDATE_CHECK_INTERVAL_SECS,
+        None => true,
+    }
+}
+
+/// Check for character data updates at app launch, throttled to once per day.
+/// Silently no-ops if a check already happened recently. Returns the number
+/// of newly-added skins if an update was performed and it added anything.
+pub async fn check_for_update_on_launch() -> Option<usize> {
+    if !should_check_for_update() {
+        info!("Skipping character data auto-update check (checked recently)");
+        return None;
+    }
+
+    info!("Running daily character data auto-update check...");
+    // Record the check time up-front so a failure (e.g. offline) doesn't
+    // cause a retry on every subsequent launch until the interval passes.
+    write_last_check_time();
+
+    match update_from_github_with_progress(|_msg| {}).await {
+        Ok(new_count) => {
+            if new_count > 0 {
+                info!(
+                    "Character data auto-update: {} new skins added",
+                    new_count
+                );
+                Some(new_count)
+            } else {
+                info!("Character data auto-update: already up to date");
+                None
+            }
+        }
+        Err(e) => {
+            warn!("Character data auto-update check failed: {}", e);
+            None
+        }
+    }
+}
+
+// ============================================================================
 // UTILITY FUNCTIONS FOR MOD TYPE DETECTION
 // ============================================================================
 

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::{fs, io};
 
-use log::info;
+use log::{info, trace};
 use regex_lite::Regex;
 
 // Use the runtime character_data module instead of compile-time embedded data
@@ -88,15 +88,17 @@ pub fn get_character_mod_skin(file: &str) -> Option<ModType> {
     let skin_id_match = SKIN_REGEX.captures(file);
     if let Some(caps) = skin_id_match {
         let full_match = caps[0].to_string();
-        info!("SKIN_REGEX matched: {} in file: {}", full_match, file);
+        // Called once per asset path inside the scan loop, so everything in this
+        // function is trace!: at info! a single mod produced one line per file,
+        // and the logger's global lock made that the scan's bottleneck.
+        trace!("SKIN_REGEX matched: {} in file: {}", full_match, file);
         // Extract just the 7-digit skin ID (skip the "1234/" or "1234\" prefix)
         // The match is like "1033/1033503" or "1033\1033503", we want the last 7 digits
         let skin_id = &full_match[full_match.len() - 7..];
-        info!("Extracted skin ID: {}", skin_id);
 
         // Use the runtime character data lookup
         if let Some(skin) = character_data::get_character_by_skin_id(skin_id) {
-            info!("Found skin in database: {} - {}", skin.name, skin.skin_name);
+            trace!("Found skin in database: {} - {}", skin.name, skin.skin_name);
             if skin.skin_name == "Default" {
                 return Some(ModType::Default(format!(
                     "{} - {}",
@@ -108,13 +110,22 @@ pub fn get_character_mod_skin(file: &str) -> Option<ModType> {
                 &skin.name, &skin.skin_name
             )));
         } else {
-            info!("Skin ID {} not found in database", skin_id);
+            trace!("Skin ID {} not found in database", skin_id);
         }
         None
     } else {
-        // Log first 100 chars of file path for debugging
-        let preview = if file.len() > 100 { &file[..100] } else { file };
-        info!("SKIN_REGEX did not match file: {}", preview);
+        // No match is the norm for nearly every file in a pak, so this was by far
+        // the highest-volume line in the app. Guarded so the truncation work is
+        // skipped entirely when trace is off, and cut on a char boundary:
+        // `&file[..100]` panics when byte 100 lands mid-character.
+        if log::log_enabled!(log::Level::Trace) {
+            let cut = file
+                .char_indices()
+                .nth(100)
+                .map(|(i, _)| i)
+                .unwrap_or(file.len());
+            trace!("SKIN_REGEX did not match file: {}", &file[..cut]);
+        }
         None
     }
 }
@@ -221,11 +232,11 @@ pub fn get_pak_characteristics_detailed(mod_contents: Vec<String>) -> ModCharact
         // Try to get skin-specific name from any path containing the skin pattern
         match get_character_mod_skin(path) {
             Some(ModType::Custom(skin)) => {
-                info!("Found custom skin: {} from path: {}", skin, path);
+                trace!("Found custom skin: {} from path: {}", skin, path);
                 character_name = Some(skin);
             }
             Some(ModType::Default(name)) => {
-                info!("Found default skin: {} from path: {}", name, path);
+                trace!("Found default skin: {} from path: {}", name, path);
                 _fallback = Some(name);
             }
             None => {
@@ -242,7 +253,7 @@ pub fn get_pak_characteristics_detailed(mod_contents: Vec<String>) -> ModCharact
                 caps.get(1).and_then(|char_id| {
                     let id = char_id.as_str();
                     character_data::get_character_name_from_id(id).map(|name| {
-                        info!(
+                        trace!(
                             "CHAR_ID_REGEX matched ID {} ({}) in path: {}",
                             id, name, file
                         );
@@ -265,7 +276,7 @@ pub fn get_pak_characteristics_detailed(mod_contents: Vec<String>) -> ModCharact
                 if let Some(char_id) = caps.get(1) {
                     let id = char_id.as_str();
                     if let Some(name) = character_data::get_character_name_from_id(id) {
-                        info!(
+                        trace!(
                             "FILENAME_CHAR_ID_REGEX matched ID {} ({}) in filename: {}",
                             id, name, filename
                         );
@@ -283,6 +294,16 @@ pub fn get_pak_characteristics_detailed(mod_contents: Vec<String>) -> ModCharact
     // Convert to sorted Vec for consistent ordering
     let mut heroes: Vec<String> = hero_names.into_iter().collect();
     heroes.sort();
+
+    // One line per mod, replacing what used to be one line per asset path. This
+    // is the part that is actually useful when a mod is mis-detected.
+    info!(
+        "Scanned {} path(s): heroes={:?} char_id={:?} skin={:?}",
+        mod_contents.len(),
+        heroes,
+        detected_char_id,
+        character_name
+    );
 
     // Determine the pure category (without character name)
     // Priority order: Audio/Movies/UI (pure) > Mesh > Static Mesh > VFX > Audio (mixed) > Texture

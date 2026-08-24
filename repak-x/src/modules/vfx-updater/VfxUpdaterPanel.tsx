@@ -6,6 +6,7 @@ import { PIPELINE_STEPS } from "./types";
 import type { VfxSettings } from "./types";
 import { ShineBorder } from "../../components/ui/ShineBorder";
 import { AuroraText } from "../../components/ui/AuroraText";
+import TailInput from "../../components/ui/TailInput";
 import {
   VscFolder,
   VscFolderOpened,
@@ -545,7 +546,7 @@ export default function VfxUpdaterPanel() {
               <div className="vfx-setting-row">
                 <label>USMAP File</label>
                 <div className="vfx-input-group">
-                  <input type="text" value={usmapPath || ""} readOnly placeholder="Select .usmap file..." />
+                  <TailInput value={usmapPath || ""} placeholder="Select .usmap file..." />
                   <button
                     onClick={() => { void runUsmapCheck(true); }}
                     disabled={isFetchingUsmap}
@@ -560,7 +561,7 @@ export default function VfxUpdaterPanel() {
               <div className="vfx-setting-row">
                 <label>Mod File (.utoc)</label>
                 <div className="vfx-input-group">
-                  <input type="text" value={modPath || ""} readOnly placeholder="Select mod to update..." />
+                  <TailInput value={modPath || ""} placeholder="Select mod to update..." />
                   <button onClick={() => handleFilePick(setModPath, [{ name: "IOStore", extensions: ["utoc"] }])}>Browse</button>
                 </div>
               </div>

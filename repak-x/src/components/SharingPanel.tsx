@@ -19,6 +19,7 @@ import {
 } from '@mui/icons-material';
 import Checkbox from './ui/Checkbox';
 import FolderTree from './FolderTree';
+import TailInput from './ui/TailInput';
 import './SharingPanel.css';
 
 import { useAlert } from './AlertHandler';
@@ -589,10 +590,8 @@ export default function SharingPanel({ onClose, gamePath, installedMods, selecte
                       )}
 
                       {folders.length === 0 && (
-                        <input
-                          type="text"
+                        <TailInput
                           value={gamePath || ''}
-                          readOnly
                           placeholder="Game mods folder (default)"
                           className="p2p-input"
                           style={{ opacity: 0.6 }}

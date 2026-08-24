@@ -32,6 +32,257 @@
   /* Specific override if needed */
 }
 
+/* Horizontal (sidebar + content) settings layout */
+.settings-modal-split {
+  max-width: 940px;
+  height: 85vh;
+}
+
+/* Title cog, matching the header's Settings button */
+.settings-modal-split .modal-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.settings-modal-split .modal-header h2 svg {
+  flex-shrink: 0;
+}
+
+.settings-layout {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* Left category picker */
+.settings-sidebar {
+  flex: 0 0 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0.75rem 0.5rem;
+  background: var(--bg-dark);
+  border-right: 1px solid var(--panel-border);
+  overflow-y: auto;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  /* override the global `button` rule, which centers its content */
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.settings-nav-item:hover:not(.active) {
+  background: var(--bg-light);
+  color: var(--text-primary);
+}
+
+.settings-nav-item.active {
+  background: var(--panel-bg);
+  color: var(--text-primary);
+  border-color: var(--panel-border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.settings-nav-icon {
+  flex-shrink: 0;
+  opacity: 0.7;
+  transition: color 0.15s, opacity 0.15s;
+}
+
+.settings-nav-item.active .settings-nav-icon {
+  color: var(--accent-primary);
+  opacity: 1;
+}
+
+/* Right settings pane */
+/* `.modal-body` is declared further down with the same specificity, so this
+   needs both classes to win on `gap`. */
+.modal-body.settings-content {
+  /* One control size + one gutter drives every indent in this pane, so a
+     description always lines up with the label of the control above it. */
+  --setting-control-size: 20px;
+  --setting-control-gap: 10px;
+  --setting-indent: calc(var(--setting-control-size) + var(--setting-control-gap));
+
+  flex: 1;
+  min-width: 0;
+  gap: 1.75rem;
+  /* space between sections */
+  animation: settings-pane-in 0.18s ease;
+}
+
+.settings-content .setting-section {
+  gap: 0.6rem;
+  /* section title -> its controls */
+}
+
+.settings-content .setting-group {
+  gap: 0.75rem;
+  /* control -> control */
+  margin-bottom: 0;
+  /* App.css adds 1rem here, which stacked on top of the section gap */
+}
+
+/* App.css `.setting-group label` (0,1,1) sets `display: block`, and the
+   checkbox component renders as a <label> -- so its own `inline-flex` lost and
+   the row was not a flex row at all. Reassert it, and drop the stray margin. */
+.settings-content .setting-group label.repakx-checkbox {
+  display: inline-flex;
+  margin-bottom: 0;
+}
+
+.settings-content .setting-group>label {
+  margin-bottom: 0;
+}
+
+/* A control and the description that belongs to it */
+.setting-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+/* Keep the label shrink-wrapped so the click target stays on the label itself,
+   while the description below still stretches and wraps normally. */
+.setting-item>.repakx-checkbox {
+  align-self: flex-start;
+}
+
+/* Description under a control: indented to sit flush with the control's label */
+.setting-subtext {
+  margin: 0;
+  padding-left: var(--setting-indent);
+  font-size: 0.825rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.setting-subtext.is-warning {
+  color: #ffb74d;
+}
+
+.setting-subtext.is-danger {
+  color: #ff5252;
+}
+
+/* Description under a section title (not tied to a control) */
+.setting-hint {
+  margin: 0 0 0.25rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+/* Checkbox rows: line the label up with the middle of the 20px box */
+.settings-content .repakx-checkbox {
+  align-items: center;
+  gap: var(--setting-control-gap);
+}
+
+.settings-content .repakx-checkbox-label {
+  font-size: 0.925rem;
+  font-weight: 400;
+  line-height: var(--setting-control-size);
+  opacity: 0.9;
+}
+
+/* Switch rows: same indent as a checkbox, so their descriptions align too */
+.setting-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.setting-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: var(--setting-control-gap);
+  font-size: 0.925rem;
+  line-height: var(--setting-control-size);
+  opacity: 0.9;
+}
+
+.setting-toggle-label svg {
+  flex-shrink: 0;
+}
+
+.setting-toggle-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* The switch track is 26px against a 20px label line, so centring the row
+   leaves 3px of slack under the label and the description drifts lower here
+   than it does under a checkbox. Pull it back onto the same rhythm. */
+.setting-toggle-row+.setting-subtext {
+  margin-top: -3px;
+}
+
+@keyframes settings-pane-in {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.settings-sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.settings-sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.settings-sidebar::-webkit-scrollbar-thumb {
+  background: var(--bg-lighter);
+  border-radius: 3px;
+}
+
+@media (max-width: 760px) {
+  .settings-layout {
+    flex-direction: column;
+  }
+
+  .settings-sidebar {
+    flex: 0 0 auto;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 4px;
+    border-right: none;
+    border-bottom: 1px solid var(--panel-border);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .settings-nav-item {
+    width: auto;
+    white-space: nowrap;
+  }
+}
+
 /* Header */
 .modal-header {
   display: flex;

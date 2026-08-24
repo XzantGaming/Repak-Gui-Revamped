@@ -1,6 +1,7 @@
 use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 use log::info;
 use parking_lot::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -32,6 +33,10 @@ fn get_logo_asset_for_theme(theme: &str) -> &'static str {
 pub struct DiscordPresenceManager {
     client: Mutex<Option<DiscordIpcClient>>,
     enabled: Mutex<bool>,
+    /// Set while a `connect()` call is doing the actual (blocking, unbounded)
+    /// IPC handshake, so concurrent callers don't pile up behind it - see the
+    /// note on `connect()` below.
+    connecting: AtomicBool,
     start_timestamp: i64,
     current_theme: Mutex<String>,
     current_state: Mutex<Option<String>>,
@@ -48,6 +53,7 @@ impl DiscordPresenceManager {
         Self {
             client: Mutex::new(None),
             enabled: Mutex::new(false),
+            connecting: AtomicBool::new(false),
             start_timestamp,
             current_theme: Mutex::new("default".to_string()),
             current_state: Mutex::new(None),
@@ -76,26 +82,40 @@ impl DiscordPresenceManager {
         self.current_theme.lock().clone()
     }
 
+    /// Connect to the Discord desktop client over its local IPC pipe.
+    ///
+    /// The underlying handshake (`DiscordIpcClient::connect`) does a blocking
+    /// pipe read with no timeout, and Discord itself can delay or throttle
+    /// that response (e.g. after rapid reconnects) for tens of seconds. The
+    /// actual I/O therefore happens *outside* `client`'s lock, so a slow
+    /// handshake only stalls the caller of `connect()` - it can no longer
+    /// block every other Discord command that just wants to check/update
+    /// `client` or `enabled` while a connect is in flight. `connecting` stops
+    /// two callers from racing to open a second IPC pipe at once.
     pub fn connect(&self) -> Result<(), String> {
-        let mut client_guard = self.client.lock();
         *self.enabled.lock() = true;
 
-        if client_guard.is_some() {
+        if self.client.lock().is_some() {
             return Ok(()); // Already connected
         }
 
+        if self.connecting.swap(true, Ordering::SeqCst) {
+            return Err("Discord connection already in progress".to_string());
+        }
+
         info!("Connecting to Discord...");
-
         let mut client = DiscordIpcClient::new(DISCORD_APP_ID);
+        let result = client.connect();
+        self.connecting.store(false, Ordering::SeqCst);
 
-        client
-            .connect()
-            .map_err(|e| format!("Failed to connect to Discord: {}", e))?;
-
-        info!("Connected to Discord Rich Presence");
-        *client_guard = Some(client);
-
-        Ok(())
+        match result {
+            Ok(()) => {
+                info!("Connected to Discord Rich Presence");
+                *self.client.lock() = Some(client);
+                Ok(())
+            }
+            Err(e) => Err(format!("Failed to connect to Discord: {}", e)),
+        }
     }
 
     pub fn disconnect(&self) -> Result<(), String> {
@@ -118,22 +138,21 @@ impl DiscordPresenceManager {
     }
 
     pub fn set_activity(&self, state: &str, details: Option<&str>) -> Result<(), String> {
-        let mut client_guard = self.client.lock();
-
-        // Self-heal: auto-reconnect if enabled but connection was dropped/failed earlier
-        if client_guard.is_none() && *self.enabled.lock() {
+        // Self-heal: auto-reconnect if enabled but connection was dropped/failed earlier.
+        // Routed through `connect()` so the (potentially slow) handshake never runs
+        // while `client` is locked - see the note on `connect()`.
+        if self.client.lock().is_none() && *self.enabled.lock() {
             info!("Discord RPC client connection was lost; attempting self-healing reconnect...");
-            let mut client = DiscordIpcClient::new(DISCORD_APP_ID);
-            if let Err(e) = client.connect() {
+            if let Err(e) = self.connect() {
                 return Err(format!(
                     "Failed to reconnect to Discord during self-healing: {}",
                     e
                 ));
             }
             info!("Self-healing reconnect succeeded");
-            *client_guard = Some(client);
         }
 
+        let mut client_guard = self.client.lock();
         let client = client_guard.as_mut().ok_or("Discord not connected")?;
 
         // Get the logo asset based on current theme

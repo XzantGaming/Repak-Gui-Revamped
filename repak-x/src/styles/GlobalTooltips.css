@@ -1,14 +1,21 @@
 /* Global Tooltip Styles - Replaces native browser tooltips */
 .global-tooltip {
   position: fixed;
-  z-index: 10000;
+  /* Must clear every overlay, since the tooltip is appended to <body> and so
+     competes with them in the root stacking context. The extension overlay sits
+     at 99999; at the old 10000 its tooltips rendered behind the panel. */
+  z-index: 999999;
   padding: 0.5rem 0.75rem;
   border-radius: 0.5rem;
   font-size: 0.8rem;
   line-height: 1.3;
   font-weight: 500;
   pointer-events: none;
-  white-space: normal;
+  /* pre-line, not normal: `title` text can carry \n (the file tree lists its
+     copy shortcuts one per line) and these tooltips replace the native ones,
+     which honoured them. Runs of spaces still collapse and long lines still
+     wrap at max-width. */
+  white-space: pre-line;
   max-width: 350px;
   min-width: min-content;
   width: auto;

@@ -1,20 +1,17 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-shell';
-import { IoMdRefresh, IoIosSkipForward } from "react-icons/io";
+import { IoIosSkipForward } from "react-icons/io";
 import { RiFileZipFill } from "react-icons/ri";
+import { FaUsers } from "react-icons/fa";
+import { FaToolbox } from "react-icons/fa6";
 import { MdRemoveModerator } from "react-icons/md";
-import Switch from './ui/Switch';
+import { IconType } from 'react-icons';
 import Progress from './ui/Progress';
 import './SettingsPanel.css'; // Reuse the same styles
-
-type ModRecord = {
-    path: string;
-    custom_name?: string;
-    enabled?: boolean;
-};
+import './ToolsPanel.css';
 
 type RecompressProgress = {
     current: number;
@@ -23,11 +20,26 @@ type RecompressProgress = {
 
 type ToolsPanelProps = {
     onClose: () => void;
-    mods?: ModRecord[];
-    onToggleMod?: (modPath: string) => void;
 };
 
-export default function ToolsPanel({ onClose, mods = [], onToggleMod }: ToolsPanelProps) {
+type StatusTone = 'on' | 'off' | 'unknown' | 'error';
+
+type ToolCardConfig = {
+    id: string;
+    icon: IconType;
+    title: string;
+    description: string;
+    onClick: () => void;
+    busy: boolean;
+    disabled?: boolean;
+    /** Persistent state indicator, for the tools that have one */
+    state?: { tone: StatusTone; label: string };
+    /** Transient result message, takes over the status line while present */
+    message?: string;
+    progress?: RecompressProgress;
+};
+
+export default function ToolsPanel({ onClose }: ToolsPanelProps) {
     const [isUpdatingChars, setIsUpdatingChars] = useState(false);
     const [charUpdateStatus, setCharUpdateStatus] = useState('');
     const [isSkippingLauncher, setIsSkippingLauncher] = useState(false);
@@ -40,39 +52,6 @@ export default function ToolsPanel({ onClose, mods = [], onToggleMod }: ToolsPan
     const [recompressStatus, setRecompressStatus] = useState('');
     const [recompressResult, setRecompressResult] = useState<any | null>(null);
     const [recompressProgress, setRecompressProgress] = useState<RecompressProgress>({ current: 0, total: 0 });
-    const [showThanosSnap, setShowThanosSnap] = useState<number | null>(null); // null or timestamp for cache-busting
-    const [thanosIsFading, setThanosIsFading] = useState(false);
-
-    // Find LOD Disabler mod - prioritize bundled mod in _LOD-Disabler folder
-    const lodDisablerMod = useMemo(() => {
-        // First look for the bundled mod in the special folder
-        const bundledMod = mods.find(mod => {
-            const modPath = mod.path?.toLowerCase() || '';
-            return modPath.includes('_lod-disabler') && modPath.includes('lods_disabler');
-        });
-        if (bundledMod) return bundledMod;
-
-        // Fallback to any LOD disabler mod
-        return mods.find(mod => {
-            const modName = mod.custom_name || mod.path?.split(/[/\\]/).pop() || '';
-            return modName.toLowerCase().includes('lods_disabler') ||
-                mod.path?.toLowerCase().includes('lods_disabler');
-        });
-    }, [mods]);
-
-    // Check if this is the bundled mod
-    const isBundledMod = useMemo(() => {
-        if (!lodDisablerMod) return false;
-        const modPath = lodDisablerMod.path?.toLowerCase() || '';
-        return modPath.includes('_lod-disabler');
-    }, [lodDisablerMod]);
-
-    // Get display name for LOD Disabler mod
-    const lodModDisplayName = useMemo(() => {
-        if (!lodDisablerMod) return '';
-        if (isBundledMod) return 'LOD Disabler (Built-in)';
-        return lodDisablerMod.custom_name || lodDisablerMod.path?.split(/[/\\]/).pop() || 'Unknown';
-    }, [lodDisablerMod, isBundledMod]);
 
     // Check skip launcher status on mount
     useEffect(() => {
@@ -227,253 +206,152 @@ export default function ToolsPanel({ onClose, mods = [], onToggleMod }: ToolsPan
         }
     };
 
+    const tools: ToolCardConfig[] = [
+        {
+            id: 'sig-bypasser',
+            icon: MdRemoveModerator,
+            title: 'Sig Bypasser',
+            description: 'Toggles the signature checks bypass.',
+            onClick: handleToggleSigBypasser,
+            busy: isTogglingSigBypasser,
+            disabled: isTogglingSigBypasser || sigBypasserState === 'NotInstalled',
+            state: sigBypasserState === 'Enabled'
+                ? { tone: 'on', label: 'Enabled' }
+                : sigBypasserState === 'Disabled'
+                    ? { tone: 'off', label: 'Disabled' }
+                    : { tone: 'unknown', label: 'Not Installed' },
+            message: sigBypasserStatusMsg
+        },
+        {
+            id: 'skip-launcher',
+            icon: IoIosSkipForward,
+            title: 'Skip Launcher Patch',
+            description: 'Sets the launch_record value to 0.',
+            onClick: handleSkipLauncherPatch,
+            busy: isSkippingLauncher,
+            disabled: isSkippingLauncher,
+            state: isLauncherPatchEnabled
+                ? { tone: 'on', label: 'Enabled' }
+                : { tone: 'off', label: 'Disabled' },
+            message: skipLauncherStatus
+        },
+        {
+            id: 'hero-database',
+            icon: FaUsers,
+            title: 'Heroes Database',
+            description: 'Update from GitHub to support new heroes and skins.',
+            onClick: handleUpdateCharacterData,
+            busy: isUpdatingChars,
+            disabled: isUpdatingChars,
+            message: charUpdateStatus
+        },
+        {
+            id: 'recompress',
+            icon: RiFileZipFill,
+            title: 'ReCompress',
+            description: 'Apply Oodle compression to old mod bundles.',
+            onClick: handleReCompress,
+            busy: isRecompressing,
+            disabled: isRecompressing,
+            message: recompressStatus,
+            progress: recompressProgress
+        }
+    ];
+
+    const renderStatus = (tool: ToolCardConfig) => {
+        // A tool with a real state always shows that state and nothing else.
+        // It deliberately does not show a busy or result line: those flipped the
+        // status to a third, transient value mid-toggle, which read as if the
+        // tool had entered some other mode. The pulsing icon already signals
+        // work in progress, and the state below settles on its own.
+        if (tool.state) {
+            return (
+                <span className={`tool-card-status is-${tool.state.tone}`}>
+                    <span className="tool-status-dot" />
+                    {tool.state.label}
+                </span>
+            );
+        }
+
+        // Action tools have no steady state, so the result is their only feedback
+        if (tool.message) {
+            const isError = tool.message.includes('Error') || tool.message.includes('Cancelled');
+            return (
+                <span className={`tool-card-status ${isError ? 'is-error' : 'is-on'}`}>
+                    <span className="tool-status-dot" />
+                    {tool.message}
+                </span>
+            );
+        }
+
+        return null;
+    };
+
     return (
         <>
             <div className="modal-overlay" onClick={onClose}>
                 <motion.div
-                    className="modal-content settings-modal"
+                    className="modal-content settings-modal tools-modal"
                     onClick={(e) => e.stopPropagation()}
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ duration: 0.15 }}
                 >
                     <div className="modal-header">
-                        <h2>Tools</h2>
+                        <h2>
+                            <FaToolbox size={20} /> Tools
+                        </h2>
                         <button className="modal-close" onClick={onClose}>×</button>
                     </div>
 
                     <div className="modal-body">
-                        <div className="setting-section">
-                            <h3>Sig Bypasser</h3>
-                            <div className="setting-group">
-                                <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>
-                                    Enables or disables the signature checks bypass.
-                                </p>
-                                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                                    <button
-                                        onClick={handleToggleSigBypasser}
-                                        disabled={isTogglingSigBypasser || sigBypasserState === 'NotInstalled'}
-                                        style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '6px',
-                                            opacity: (isTogglingSigBypasser || sigBypasserState === 'NotInstalled') ? 0.5 : 1,
-                                            cursor: (isTogglingSigBypasser || sigBypasserState === 'NotInstalled') ? 'not-allowed' : 'pointer'
-                                        }}
-                                    >
-                                        <MdRemoveModerator size={16} />
-                                        {isTogglingSigBypasser ? 'Applying...' : 'Toggle Sig Bypasser'}
-                                    </button>
-                                    <span style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '0.4rem',
-                                        fontSize: '0.85rem',
-                                        fontWeight: 600,
-                                        color: sigBypasserState === 'Enabled' ? '#4CAF50' : (sigBypasserState === 'Disabled' ? '#ff5252' : '#9e9e9e')
-                                    }}>
-                                        <span style={{
-                                            width: '8px',
-                                            height: '8px',
-                                            borderRadius: '50%',
-                                            backgroundColor: sigBypasserState === 'Enabled' ? '#4CAF50' : (sigBypasserState === 'Disabled' ? '#ff5252' : '#9e9e9e')
-                                        }}></span>
-                                        {sigBypasserState === 'Enabled' ? 'Enabled' : (sigBypasserState === 'Disabled' ? 'Disabled' : 'Not Installed')}
-                                    </span>
-                                </div>
-                                {sigBypasserStatusMsg && (
-                                    <p style={{
-                                        fontSize: '0.85rem',
-                                        marginTop: '0.5rem',
-                                        color: sigBypasserStatusMsg.includes('Error') ? '#ff5252' : '#4CAF50'
-                                    }}>
-                                        {sigBypasserStatusMsg}
-                                    </p>
-                                )}
-                            </div>
-                        </div>
-
-                        <div className="setting-section">
-                            <h3>Skip Launcher Patch</h3>
-                            <div className="setting-group">
-                                <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>
-                                    Sets <b>launch_record</b> value to 0.
-                                </p>
-                                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                                    <button
-                                        onClick={handleSkipLauncherPatch}
-                                        disabled={isSkippingLauncher}
-                                        style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '6px',
-                                            opacity: isSkippingLauncher ? 0.5 : 1,
-                                            cursor: isSkippingLauncher ? 'not-allowed' : 'pointer'
-                                        }}
-                                    >
-                                        <IoIosSkipForward size={16} />
-                                        {isSkippingLauncher ? 'Applying...' : 'Skip Launcher Patch'}
-                                    </button>
-                                    <span style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '0.4rem',
-                                        fontSize: '0.85rem',
-                                        fontWeight: 600,
-                                        color: isLauncherPatchEnabled ? '#4CAF50' : '#ff5252'
-                                    }}>
-                                        <span style={{
-                                            width: '8px',
-                                            height: '8px',
-                                            borderRadius: '50%',
-                                            backgroundColor: isLauncherPatchEnabled ? '#4CAF50' : '#ff5252'
-                                        }}></span>
-                                        {isLauncherPatchEnabled ? 'Enabled' : 'Disabled'}
-                                    </span>
-                                </div>
-                                {skipLauncherStatus && (
-                                    <p style={{
-                                        fontSize: '0.85rem',
-                                        marginTop: '0.5rem',
-                                        color: skipLauncherStatus.includes('Error') ? '#ff5252' : '#4CAF50'
-                                    }}>
-                                        {skipLauncherStatus}
-                                    </p>
-                                )}
-                            </div>
-                        </div>
-
-                        <div className="setting-section">
-                            <h3>Character Database</h3>
-                            <div className="setting-group">
-                                <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>
-                                    Update the character database from GitHub to support new heroes and skins.
-                                </p>
-                                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                    <button
-                                        onClick={handleUpdateCharacterData}
-                                        disabled={isUpdatingChars}
-                                        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                                    >
-                                        <IoMdRefresh size={18} className={isUpdatingChars ? 'spin-animation' : ''} />
-                                        {isUpdatingChars ? 'Updating...' : 'Update Heroes Database'}
-                                    </button>
-                                </div>
-                                {charUpdateStatus && (
-                                    <p style={{
-                                        fontSize: '0.85rem',
-                                        marginTop: '0.5rem',
-                                        color: charUpdateStatus.includes('Error') || charUpdateStatus.includes('Cancelled') ? '#ff5252' : '#4CAF50'
-                                    }}>
-                                        {charUpdateStatus}
-                                    </p>
-                                )}
-                                <p style={{ fontSize: '0.75rem', opacity: 0.5, marginTop: '0.5rem' }}>
-                                    Database maintained by{' '}
-                                    <span
-                                        style={{ textDecoration: 'underline', cursor: 'pointer' }}
-                                        onClick={() => open('https://github.com/donutman07/MarvelRivalsCharacterIDs')}
-                                    >
-                                        donutman07
-                                    </span>
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="setting-section">
-                            <h3>ReCompress</h3>
-                            <div className="setting-group">
-                                <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>
-                                    Apply Oodle compression to all IOStore bundles paked with the old Repak GUI.
-                                </p>
-                                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                    <button
-                                        onClick={handleReCompress}
-                                        disabled={isRecompressing}
-                                        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                                    >
-                                        <RiFileZipFill size={16} className={isRecompressing ? 'spin-animation' : ''} />
-                                        {isRecompressing ? 'Scanning...' : 'ReCompress'}
-                                    </button>
-                                </div>
-                                {isRecompressing && recompressProgress.total > 0 && (
-                                    <div style={{ marginTop: '0.75rem' }}>
-                                        <Progress
-                                            value={recompressProgress.current}
-                                            maxValue={recompressProgress.total}
-                                            size="md"
-                                            color="primary"
-                                            showValueLabel
-                                            isStriped
-                                        />
-                                    </div>
-                                )}
-                                {recompressStatus && (
-                                    <p style={{
-                                        fontSize: '0.85rem',
-                                        marginTop: '0.5rem',
-                                        color: recompressStatus.includes('Error') ? '#ff5252' : '#4CAF50'
-                                    }}>
-                                        {recompressStatus}
-                                    </p>
-                                )}
-                            </div>
-                        </div>
-
-                        <div className="setting-section">
-                            <h3>Character LODs Thanos</h3>
-                            <div className="setting-group">
-                                {lodDisablerMod ? (
-                                    <>
-                                        <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>
-                                            Disable character LODs to prevent texture mods from being reverted to vanilla textures from a far distance.
-                                        </p>
-                                        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                                            <Switch
-                                                checked={lodDisablerMod.enabled}
-                                                onChange={() => {
-                                                    const pathStr = typeof lodDisablerMod.path === 'string'
-                                                        ? lodDisablerMod.path
-                                                        : String(lodDisablerMod.path);
-                                                    console.log('Toggling LOD mod:', pathStr);
-
-                                                    // Show Thanos snap when ENABLING (currently disabled)
-                                                    if (!lodDisablerMod.enabled) {
-                                                        const timestamp = Date.now();
-                                                        setThanosIsFading(false);
-                                                        setShowThanosSnap(timestamp);
-                                                        // Timer starts in onLoad handler after GIF is loaded
-                                                    }
-
-                                                    onToggleMod?.(pathStr);
-                                                }}
-                                            />
-                                            <span style={{ fontSize: '0.9rem' }}>
-                                                {lodDisablerMod.enabled ? 'LODs Disabled (Mod enabled)' : 'LODs Enabled (Default: best performance)'}
+                        <div className="tools-grid">
+                            {tools.map((tool) => {
+                                const Icon = tool.icon;
+                                const showProgress = tool.busy && !!tool.progress && tool.progress.total > 0;
+                                return (
+                                    // The progress bar sits beside the button, not inside it:
+                                    // <button> takes phrasing content only, and Progress renders divs.
+                                    <div className="tool-card-slot" key={tool.id}>
+                                        <button
+                                            className={`tool-card ${tool.busy ? 'is-busy' : ''}`}
+                                            onClick={tool.onClick}
+                                            disabled={tool.disabled}
+                                        >
+                                            <span className="tool-card-icon">
+                                                <Icon />
                                             </span>
-                                        </div>
-                                        <p style={{ fontSize: '0.75rem', opacity: 0.5, marginTop: '0.5rem' }}>
-                                            {isBundledMod ? 'Built-in mod (auto-deployed)' : `Mod: ${lodModDisplayName}`}
-                                        </p>
-                                    </>
-                                ) : (
-                                    <>
-                                        <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>
-                                            LOD Disabler not found. This mod is bundled with the app and should be auto-deployed when you set a valid mods folder.
-                                            If missing, try re-selecting your mods folder.
-                                        </p>
-                                        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', opacity: 0.5 }}>
-                                            <Switch
-                                                checked={false}
-                                                onChange={() => { }}
-                                                isDisabled={true}
-                                            />
-                                            <span style={{ fontSize: '0.9rem' }}>LOD Thanos (Not Available)</span>
-                                        </div>
-                                    </>
-                                )}
-                            </div>
+                                            <span className="tool-card-title">{tool.title}</span>
+                                            <span className="tool-card-sub">{tool.description}</span>
+                                            {renderStatus(tool)}
+                                        </button>
+                                        {showProgress && (
+                                            <div className="tool-card-progress">
+                                                <Progress
+                                                    value={tool.progress!.current}
+                                                    maxValue={tool.progress!.total}
+                                                    size="sm"
+                                                    color="primary"
+                                                    isStriped
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </div>
+
+                        {/* Kept outside the cards: a link nested inside a <button> would be
+                            invalid markup and its click would also fire the card. */}
+                        <p className="tools-footnote">
+                            Heroes database maintained by{' '}
+                            <span
+                                className="tools-footnote-link"
+                                onClick={() => open('https://github.com/donutman07/MarvelRivalsCharacterIDs')}
+                            >
+                                donutman07
+                            </span>
+                        </p>
                     </div>
 
                     <div className="modal-footer" style={{ gap: '0.5rem' }}>
@@ -487,47 +365,6 @@ export default function ToolsPanel({ onClose, mods = [], onToggleMod }: ToolsPan
                     </div>
                 </motion.div>
             </div>
-
-            {/* Thanos Snap Easter Egg */}
-            {
-                showThanosSnap && (
-                    <div
-                        style={{
-                            position: 'fixed',
-                            inset: 0,
-                            zIndex: 9999999,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            background: 'rgba(0, 0, 0, 0.7)',
-                            backdropFilter: 'blur(4px)',
-                            opacity: thanosIsFading ? 0 : 1,
-                            transition: 'opacity 0.5s ease-out'
-                        }}
-                        onClick={() => setShowThanosSnap(null)}
-                    >
-                        <img
-                            key={showThanosSnap}
-                            src={`https://i.imgur.com/RsIL6sH.gif?t=${showThanosSnap}`}
-                            alt="Thanos Snap"
-                            onLoad={() => {
-                                // Start fade-out timer only after GIF is fully loaded
-                                setTimeout(() => setThanosIsFading(true), 1250);
-                                setTimeout(() => {
-                                    setShowThanosSnap(null);
-                                    setThanosIsFading(false);
-                                }, 2100);
-                            }}
-                            style={{
-                                maxWidth: '80%',
-                                maxHeight: '80%',
-                                borderRadius: '12px',
-                                boxShadow: '0 0 60px rgba(185, 185, 185, 0.5)'
-                            }}
-                        />
-                    </div>
-                )}
         </>
     );
 }
-

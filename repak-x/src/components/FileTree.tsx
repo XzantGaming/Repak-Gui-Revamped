@@ -24,9 +24,19 @@ const FolderIcon = ({ isOpen }: { isOpen: boolean }) => {
     <VscFolder className="node-icon folder-icon" />;
 };
 
+// Right-click copies the full path; modifiers narrow what lands on the clipboard.
+const copyVariant = (fullPath: string, isFolder: boolean, nameOnly: boolean, stripExtension: boolean) => {
+  let value = nameOnly ? (fullPath.split('/').pop() || fullPath) : fullPath;
+  // Folder names can legitimately contain dots, so only files lose a suffix.
+  if (stripExtension && !isFolder) {
+    value = value.replace(/\.[^./]+$/, '');
+  }
+  return value;
+};
+
 const TreeNode = ({ node }: { node: TreeNodeData }) => {
   const [isOpen, setIsOpen] = useState(true); // Default to open for better visibility
-  const [showCopied, setShowCopied] = useState(false);
+  const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const isFolder = node.isFolder;
 
   const handleToggle = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -39,15 +49,29 @@ const TreeNode = ({ node }: { node: TreeNodeData }) => {
   const handleContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    
-    // Copy path to clipboard
-    if (node.fullPath) {
-      navigator.clipboard.writeText(node.fullPath).then(() => {
-        setShowCopied(true);
-        setTimeout(() => setShowCopied(false), 1500);
-      }).catch(err => console.error('Failed to copy:', err));
-    }
+
+    if (!node.fullPath) return;
+
+    // Ctrl -> name only, Shift -> drop the extension. They combine.
+    const nameOnly = e.ctrlKey || e.metaKey;
+    const stripExtension = e.shiftKey;
+    const value = copyVariant(node.fullPath, isFolder, nameOnly, stripExtension);
+
+    const label = nameOnly ? 'Copied name' : 'Copied path';
+
+    navigator.clipboard.writeText(value).then(() => {
+      setCopiedLabel(stripExtension && !isFolder ? `${label} (no ext)` : label);
+      setTimeout(() => setCopiedLabel(null), 1500);
+    }).catch(err => console.error('Failed to copy:', err));
   };
+
+  const copyHint = node.fullPath
+    ? [
+      'Right click to copy full path',
+      'Ctrl + right click: name only',
+      ...(isFolder ? [] : ['Shift + right click: without extension'])
+    ].join('\n')
+    : node.name;
 
   return (
     <div className="tree-node">
@@ -55,11 +79,11 @@ const TreeNode = ({ node }: { node: TreeNodeData }) => {
         className={`node-content ${isFolder ? 'folder' : 'file'}`}
         onClick={handleToggle}
         onContextMenu={handleContextMenu}
-        title={node.fullPath ? `Right-click to copy: ${node.fullPath}` : node.name}
+        title={copyHint}
       >
         {isFolder ? <FolderIcon isOpen={isOpen} /> : <FileIcon name={node.name} />}
         <span className="node-label">{node.name}</span>
-        {showCopied && <span className="copied-tooltip">Copied!</span>}
+        {copiedLabel && <span className="copied-tooltip">{copiedLabel}</span>}
       </div>
       
       {isFolder && isOpen && (
@@ -81,9 +105,15 @@ const FileTree = ({ files }: FileTreeProps) => {
     const fileList: string[] = Array.isArray(files) ? files : [];
 
     fileList.forEach((path) => {
+      // Skip repak/iostore metadata files (chunknames, patched_files) - not real mod content
+      const lowerPath = path.toLowerCase();
+      if (lowerPath.includes('chunknames') || lowerPath.includes('patched_files')) {
+        return;
+      }
+
       // Normalize path separators
       let normalizedPath = path.replace(/\\/g, '/');
-      
+
       // 1. Skip "Game" folder if it's at the start
       // Handle cases like "Game/Marvel/..." or just "Game" or "Game/"
       if (normalizedPath.startsWith('Game/')) {

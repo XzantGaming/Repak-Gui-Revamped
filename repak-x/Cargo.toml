@@ -115,9 +115,6 @@ winreg = "0.52"
 default = []
 # Serves frontend from embedded assets instead of dev server (required for production builds)
 custom-protocol = ["tauri/custom-protocol"]
-# Enable to bundle the LOD Disabler mod into the application
-# Requires: repak-gui/src/bundled_mods/SK_LODs_Disabler_9999999_P.pak
-bundled_lod_mod = []
 
 [build-dependencies]
 winres = "0.1.12"

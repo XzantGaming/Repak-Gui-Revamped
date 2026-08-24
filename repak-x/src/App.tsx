@@ -40,6 +40,7 @@ import ContextMenu from './components/ContextMenu'
 import LogDrawer from './components/LogDrawer'
 import DropZoneOverlay from './components/DropZoneOverlay'
 import ExtensionModOverlay from './components/ExtensionModOverlay'
+import type { ExtensionInstallOptions } from './components/ExtensionModOverlay'
 import QuickOrganizeOverlay from './components/QuickOrganizeOverlay'
 import InputPromptModal from './components/InputPromptModal'
 import UpdateModModal from './components/UpdateModModal'
@@ -162,7 +163,7 @@ type ContextMenuState = {
   folder?: FolderRecord | null
 }
 
-type NewFolderPromptState = { paths: string[]; moveFolderId?: string; parentId?: string }
+type NewFolderPromptState = { paths: string[]; moveFolderId?: string; parentId?: string; moveModPaths?: string[] }
 type NewTagPromptState = { callback: (tag: string) => void }
 type NewFolderFromInstallState = { callback: (name: string) => void }
 type RenameFolderPromptState = { folderId: string; currentName: string }
@@ -258,6 +259,9 @@ function App() {
   const [downloadedUpdatePath, setDownloadedUpdatePath] = useState<string | null>(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [showChangelogModal, setShowChangelogModal] = useState(false);
+  // Captured at startup, before the marker is rewritten. Surfaced in Settings so
+  // a user on a release build (no devtools) can read back what the check saw.
+  const [changelogMarker, setChangelogMarker] = useState<{ lastSeen: string; current: string; recorded: boolean } | null>(null);
   const [changelogContent, setChangelogContent] = useState('');
 
   // Panel visibility state - grouped for cleaner management
@@ -1407,10 +1411,58 @@ function App() {
       const ver = await invoke('get_app_version') as any
       setVersion(ver)
 
-      // Check if we just updated — show changelog if version changed
-      const lastSeen = localStorage.getItem('lastSeenVersion')
+      // Check if we just updated — show changelog if version changed.
+      //
+      // The version is recorded BEFORE the changelog is shown, and the changelog
+      // only shows if that record verifiably stuck. The previous order wrote it
+      // last, so anything that stopped the write — a throwing localStorage
+      // (quota, disabled storage, locked profile) or an exception earlier in
+      // loadInitialData — left the old version stored and re-showed the
+      // changelog on every launch, forever. Failing closed costs at most one
+      // missed changelog, which is still reachable from Settings.
+      // The marker lives on disk (config_dir/Repak-X/last_seen_version.txt), not
+      // in localStorage. localStorage did not survive restarts for at least one
+      // user, which re-armed this check on every launch; the on-disk config the
+      // rest of the app uses persists for them.
+      const readLastSeen = async (): Promise<string> => {
+        try {
+          return String(await invoke('get_last_seen_version') || '')
+        } catch (e) {
+          console.warn('[Changelog] Could not read last seen version:', e)
+          return ''
+        }
+      }
+
+      const recordSeenVersion = async (value: string): Promise<boolean> => {
+        try {
+          return await invoke('set_last_seen_version', { version: value }) as boolean
+        } catch (e) {
+          console.warn('[Changelog] Could not record seen version:', e)
+          return false
+        }
+      }
+
+      let lastSeen = await readLastSeen()
+
+      // One-time migration: adopt the old localStorage value so existing users
+      // are not shown the changelog again for a version they already saw.
+      if (!lastSeen) {
+        try {
+          const legacy = localStorage.getItem('lastSeenVersion')
+          if (legacy) {
+            lastSeen = legacy
+            console.debug('[Changelog] Migrated lastSeenVersion from localStorage', { legacy })
+          }
+        } catch {
+          /* storage unavailable - treat as first run */
+        }
+      }
+
       const normalizedVersion = String(ver || '').replace(/^v/, '')
-      if (lastSeen && lastSeen !== ver) {
+      const versionRecorded = normalizedVersion ? await recordSeenVersion(ver) : false
+      setChangelogMarker({ lastSeen, current: String(ver || ''), recorded: versionRecorded })
+
+      if (versionRecorded && lastSeen && lastSeen !== ver) {
         console.debug('[Changelog] Version change detected', { lastSeen, currentVersion: ver, normalizedVersion })
         try {
           const headers = { 'Accept': 'application/vnd.github.v3+json' }
@@ -1474,12 +1526,18 @@ function App() {
         }
       } else {
         console.debug('[Changelog] Skipping changelog check on startup', {
-          reason: !lastSeen ? 'first_install_or_no_last_seen' : 'version_unchanged',
+          reason: !normalizedVersion
+            ? 'no_app_version'
+            : !versionRecorded
+              ? 'version_could_not_be_recorded'
+              : !lastSeen
+                ? 'first_install_or_no_last_seen'
+                : 'version_unchanged',
           lastSeen,
-          currentVersion: ver
+          currentVersion: ver,
+          versionRecorded
         })
       }
-      localStorage.setItem('lastSeenVersion', ver)
 
       // Fetch character data from backend (up-to-date from GitHub sync)
       try {
@@ -1815,8 +1873,13 @@ function App() {
     }
   }
 
-  const handleCreateFolder = (options?: { moveFolderId?: string; parentId?: string }) => {
-    setNewFolderPrompt({ paths: [], moveFolderId: options?.moveFolderId, parentId: options?.parentId })
+  const handleCreateFolder = (options?: { moveFolderId?: string; parentId?: string; moveModPaths?: string[] }) => {
+    setNewFolderPrompt({
+      paths: [],
+      moveFolderId: options?.moveFolderId,
+      parentId: options?.parentId,
+      moveModPaths: options?.moveModPaths
+    })
   }
 
   // Create a folder and return its ID (for use by overlay components)
@@ -1842,12 +1905,15 @@ function App() {
     const paths = newFolderPrompt.paths || []
     const moveFolderId = newFolderPrompt.moveFolderId
     const parentId = newFolderPrompt.parentId
+    const moveModPaths = newFolderPrompt.moveModPaths || []
     const pathCount = paths.length
     const pathsCopy = [...paths]
 
     // Check specific to quick organize flow
     const isQuickOrganize = pathCount > 0
     const isMoveAfterCreate = !!moveFolderId
+    // "Move to... > New Folder" on mods: create the folder, then move them in
+    const isMoveModsAfterCreate = moveModPaths.length > 0
 
     let finalFolderName = folderName
     if (parentId) {
@@ -1857,11 +1923,13 @@ function App() {
       }
     }
 
-    if (isMoveAfterCreate && gameRunning && !bypassGameRunningLock) {
+    if ((isMoveAfterCreate || isMoveModsAfterCreate) && gameRunning && !bypassGameRunningLock) {
       setNewFolderPrompt(null)
       alert.warning(
         'Game Running',
-        'Cannot move folders while game is running.'
+        isMoveModsAfterCreate
+          ? 'Cannot move mods while game is running.'
+          : 'Cannot move folders while game is running.'
       )
       return
     }
@@ -1896,6 +1964,36 @@ function App() {
             return { folder: finalFolderName, movedFolderId: moveFolderId, isInstall: false, isMove: true }
           }
 
+          if (isMoveModsAfterCreate) {
+            // The details panel and the selection both key off the old paths,
+            // which stop existing the moment the mods are reassigned.
+            if (selectedMod && moveModPaths.includes(selectedMod.path)) {
+              setSelectedMod(null)
+            }
+
+            for (const modPath of moveModPaths) {
+              await invoke('assign_mod_to_folder', { modPath, folderId: finalFolderName })
+            }
+
+            setSelectedMods(prev => {
+              const next = new Set(prev)
+              moveModPaths.forEach(p => next.delete(p))
+              return next.size === prev.size ? prev : next
+            })
+
+            await loadMods()
+            await loadFolders()
+            setStatus(`Moved ${moveModPaths.length} mod(s) to "${finalFolderName}"`)
+
+            return {
+              folder: finalFolderName,
+              count: moveModPaths.length,
+              isInstall: false,
+              isMove: false,
+              isMoveMods: true
+            }
+          }
+
           if (isQuickOrganize) {
             // Then quick organize to the new folder
             await invoke('quick_organize', { paths: pathsCopy, targetFolder: folderName })
@@ -1915,22 +2013,32 @@ function App() {
       })(),
       {
         loading: {
-          title: isQuickOrganize ? 'Creating Folder & Installing' : 'Creating Folder',
+          title: isQuickOrganize
+            ? 'Creating Folder & Installing'
+            : isMoveModsAfterCreate
+              ? 'Creating Folder & Moving'
+              : 'Creating Folder',
           description: isQuickOrganize
             ? `Creating "${folderName}" and copying ${pathCount} file${pathCount > 1 ? 's' : ''}...`
-            : `Creating folder "${folderName}"...`
+            : isMoveModsAfterCreate
+              ? `Creating "${folderName}" and moving ${moveModPaths.length} mod${moveModPaths.length > 1 ? 's' : ''}...`
+              : `Creating folder "${folderName}"...`
         },
         success: (result) => ({
           title: result.isInstall
             ? 'Installation Complete'
             : result.isMove
               ? 'Folder Moved'
-              : 'Folder Created',
+              : result.isMoveMods
+                ? 'Mods Moved'
+                : 'Folder Created',
           description: result.isInstall
             ? `Created folder and installed ${result.count} mod${result.count > 1 ? 's' : ''}`
             : result.isMove
               ? `Created "${result.folder}" and moved "${result.movedFolderId}" into it`
-              : `Successfully created "${result.folder}"`
+              : result.isMoveMods
+                ? `Created "${result.folder}" and moved ${result.count} mod${result.count > 1 ? 's' : ''} into it`
+                : `Successfully created "${result.folder}"`
         }),
         error: (err) => ({
           title: 'Operation Failed',
@@ -1947,6 +2055,29 @@ function App() {
       await invoke('delete_folder', { id: folderId })
       if (selectedFolderId === folderId) {
         setSelectedFolderId('all')
+      }
+
+      // The folder (and any subfolders/mods inside it) was deleted from disk.
+      // If the mod currently shown in the details panel lived in it, its files
+      // are now gone too, so close the panel instead of letting it error out
+      // trying to reload details for a path that no longer exists.
+      if (selectedMod?.folder_id === folderId || selectedMod?.folder_id?.startsWith(folderId + '/')) {
+        setSelectedMod(null)
+      }
+
+      // Also drop any bulk-selected mods that lived in the deleted folder,
+      // otherwise the selection toolbar keeps referencing now-gone paths.
+      const deletedPaths = new Set(
+        mods
+          .filter(m => m.folder_id === folderId || m.folder_id?.startsWith(folderId + '/'))
+          .map(m => m.path)
+      )
+      if (deletedPaths.size > 0) {
+        setSelectedMods(prev => {
+          const next = new Set(prev)
+          deletedPaths.forEach(p => next.delete(p))
+          return next
+        })
       }
 
       await loadFolders()
@@ -2107,6 +2238,15 @@ function App() {
     try {
       await invoke('assign_mod_to_folder', { modPath, folderId: effectiveFolderId })
       setStatus('Mod moved to folder')
+      // The mod's path changed, so any selection entry for the old location is
+      // now dangling. Drop it rather than leave the toolbar acting on a file
+      // that is no longer there.
+      setSelectedMods(prev => {
+        if (!prev.has(modPath)) return prev
+        const next = new Set(prev)
+        next.delete(modPath)
+        return next
+      })
       await loadMods()
       await loadFolders()
     } catch (error) {
@@ -2261,7 +2401,10 @@ function App() {
   )
 
   // Handle installing a mod received from the browser extension
-  const handleExtensionModInstall = async (targetFolderId: string | null) => {
+  const handleExtensionModInstall = async (
+    targetFolderId: string | null,
+    options: ExtensionInstallOptions
+  ) => {
     if (!extensionModPath) return
 
     const modPath = extensionModPath // Copy path before clearing state
@@ -2282,12 +2425,30 @@ function App() {
         try {
           await invoke('quick_organize', {
             paths: [modPath],
-            targetFolder: targetFolderId || ''
+            targetFolder: targetFolderId || '',
+            selections: options.selections,
+            renames: options.renames,
+            flatten: options.flatten
           })
 
           await loadMods()
           await loadFolders()
           setStatus(`Mod installed successfully!`)
+
+          // Only after the install has actually succeeded. A failure above
+          // throws, so the download is left in place for the user to retry.
+          // Cleanup failing is not itself an install failure, so it only warns.
+          if (options.deleteArchive) {
+            try {
+              await invoke('delete_source_archive', { path: modPath })
+            } catch (cleanupErr) {
+              console.warn('Failed to delete source archive:', cleanupErr)
+              alert.warning(
+                'Download Not Removed',
+                `The mod installed fine, but the downloaded file could not be deleted: ${cleanupErr}`
+              )
+            }
+          }
 
           // Show warning after success if game is running
           if (gameRunning) {
@@ -2345,7 +2506,12 @@ function App() {
         try {
           await invoke('quick_organize', {
             paths: pathsCopy,
-            targetFolder: targetFolderId || ''
+            targetFolder: targetFolderId || '',
+            // Explicit nulls rather than omitting: this path installs everything
+            // it was given, with original names and structure, as it always has.
+            selections: null,
+            renames: null,
+            flatten: false
           })
 
           await loadMods()
@@ -2467,12 +2633,6 @@ function App() {
 
   // Compute base filtered mods (excluding folder filter)
   const baseFilteredMods = mods.filter(mod => {
-    // Hide LODs_Disabler mods from the list - they are controlled via Tools panel
-    const modName = mod.mod_name || mod.custom_name || mod.path.split(/[/\\]/).pop() || ''
-    if (modName.toLowerCase().includes('lods_disabler') || mod.path.toLowerCase().includes('lods_disabler')) {
-      return false
-    }
-
     // Search query
     if (searchQuery) {
       const query = searchQuery.toLowerCase()
@@ -3065,6 +3225,7 @@ function App() {
           setParallelProcessing={handleSetParallelProcessing}
           onCheckForUpdates={handleCheckForUpdates}
           onViewChangelog={handleViewChangelog}
+          changelogMarker={changelogMarker}
           isCheckingUpdates={isCheckingUpdates}
           onReplayTour={handleReplayTour}
           onOpenShortcuts={() => setPanel('shortcuts', true)}
@@ -3081,8 +3242,6 @@ function App() {
       {panels.tools && (
         <ToolsPanel
           onClose={() => setPanel('tools', false)}
-          mods={mods}
-          onToggleMod={handleToggleMod}
         />
       )}
 
@@ -3577,16 +3736,19 @@ function App() {
               <div className="center-header">
                 <div className="header-title">
                   <h2>
-                    {selectedFolderId === 'all' ? 'All Mods' :
-                      folders.find(f => f.id === selectedFolderId)?.name || 'Unknown Folder'}
+                    <span className="header-title-name">
+                      {selectedFolderId === 'all' ? 'All Mods' :
+                        folders.find(f => f.id === selectedFolderId)?.name || 'Unknown Folder'}
+                    </span>
                     <span className="mod-count">
-                      ({filteredMods.filter(m => m.enabled).length}/{filteredMods.length} enabled)
+                      ({filteredMods.filter(m => m.enabled).length}/{filteredMods.length}<span className="mod-count-word">&nbsp;enabled</span>)
                     </span>
                   </h2>
                 </div>
                 <div className="header-actions" data-tour="header-actions">
                   <button onClick={handleCheckClashes} className="btn-ghost btn-check-conflicts" title="Check for conflicts">
-                    <IoMdWarning className="warning-icon" style={{ color: 'var(--accent-primary)', width: '18px', height: '18px' }} /> Check Conflicts
+                    <IoMdWarning className="warning-icon" style={{ color: 'var(--accent-primary)', width: '18px', height: '18px' }} />
+                    <span className="btn-label">Check Conflicts</span>
                   </button>
                   <div className="divider-vertical" />
                   <div className="view-switcher">
@@ -3638,18 +3800,22 @@ function App() {
 
               {/* Bulk Actions Toolbar */}
               <div className={`bulk-actions-toolbar ${selectedMods.size === 0 ? 'inactive' : ''}`}>
-                <div className="selection-info" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>{selectedMods.size} selected</span>
+                <div className="selection-info">
+                  <span className="bulk-count"><span className="bulk-count-value">{selectedMods.size}</span></span>
+                  <span className="bulk-count-label">selected</span>
                   <button onClick={() => {
                     const allPaths = filteredMods.map(m => m.path)
                     setSelectedMods(new Set(allPaths))
-                  }} className="btn-ghost" style={{ padding: '4px 12px', height: '32px' }}>Select All</button>
-                  <button onClick={handleDeselectAll} className="btn-ghost" style={{ padding: '4px 12px', height: '32px' }}>Clear</button>
+                  }} className="btn-ghost" title="Select all mods in view">
+                    <span className="bulk-label-full">Select All</span>
+                    <span className="bulk-label-short">All</span>
+                  </button>
+                  <button onClick={handleDeselectAll} className="btn-ghost" title="Clear selection">Clear</button>
                 </div>
                 <div className="bulk-controls">
-                  <div style={{ width: '200px', height: '40px' }}>
+                  <div className="bulk-field" title="Move selected mods to a folder">
                     <CustomDropdown
-                      icon={<MdDriveFileMoveOutline style={{ fontSize: '1.2rem', opacity: 0.7 }} />}
+                      icon={<MdDriveFileMoveOutline style={{ fontSize: '1rem', opacity: 0.7 }} />}
                       options={[
                         { value: 'root', label: 'Root (~mods)' }, // Option to move back to root
                         ...folders.filter(f => f.name !== '~mods').map(f => ({ value: f.id, label: f.name }))
@@ -3665,9 +3831,9 @@ function App() {
                     />
                   </div>
 
-                  <div style={{ width: '200px', height: '40px' }}>
+                  <div className="bulk-field" title="Add or remove tags on selected mods">
                     <CustomDropdown
-                      icon={<FaTag style={{ fontSize: '1.2rem', opacity: 0.7 }} />}
+                      icon={<FaTag style={{ fontSize: '1rem', opacity: 0.7 }} />}
                       options={allTags.map(t => {
                         const isApplied = mods.some(m => selectedMods.has(m.path) && toTagArray(m.custom_tags).includes(t));
                         return { value: t, label: t, showDelete: isApplied };
@@ -3679,7 +3845,7 @@ function App() {
                       onDeleteOption={(tag) => {
                         if (tag) handleBulkRemoveTag(tag)
                       }}
-                      placeholder="Manage Tags"
+                      placeholder="Tags"
                       disabled={selectedMods.size === 0}
                       onAddNew={() => setNewTagPrompt({
                         callback: async (tag) => {
@@ -3703,7 +3869,7 @@ function App() {
                     const allEnabled = disabledCount === 0
                     const allDisabled = enabledCount === 0
                     return (
-                      <div className="split-btn-group" style={{ height: '40px' }}>
+                      <div className="split-btn-group bulk-toggle-group">
                         <button
                           onClick={() => handleBulkToggle(true)}
                           className="btn-ghost left"
@@ -3729,16 +3895,15 @@ function App() {
                   })()}
 
                   <button
-                    className={`btn-ghost danger ${isDeletingBulk ? 'holding' : ''}`}
+                    className={`btn-ghost danger bulk-delete ${isDeletingBulk ? 'holding' : ''}`}
                     onMouseDown={handleBulkDeleteDown}
                     onMouseUp={handleBulkDeleteUp}
                     onMouseLeave={handleBulkDeleteUp}
-                    style={{ height: '40px', justifyContent: 'center' }}
                     title={holdToDelete ? "Hold 2s to delete selected mods" : "Click to delete selected mods"}
                   >
                     <div className="danger-bg" />
                     <span style={{ position: 'relative', zIndex: 2, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                      <RiDeleteBin2Fill size="1.25rem" />
+                      <RiDeleteBin2Fill size="1rem" />
                       {`(${selectedMods.size})`}
                     </span>
                   </button>
@@ -3838,9 +4003,31 @@ function App() {
             onClose={closeContextMenu}
             onAssignTag={(tag) => contextMenu.mod && handleAddTagToSingleMod(contextMenu.mod.path, tag)}
             onNewTag={(callback) => setNewTagPrompt({ callback })}
-            onMoveTo={(folderId) => contextMenu.mod && handleMoveSingleMod(contextMenu.mod.path, folderId)}
+            onMoveTo={(folderId) => {
+              if (!contextMenu.mod) return
+              // Right-clicking a mod that is part of the current selection acts
+              // on the whole selection, matching the bulk toolbar. Previously it
+              // moved only the clicked mod and left the rest selected, pointing
+              // at paths that no longer existed.
+              if (selectedMods.has(contextMenu.mod.path)) {
+                handleAssignToFolder(folderId)
+              } else {
+                handleMoveSingleMod(contextMenu.mod.path, folderId)
+              }
+            }}
             onMoveFolderTo={(newParentId) => contextMenu.folder && handleMoveFolder(contextMenu.folder.id, newParentId)}
-            onCreateFolder={handleCreateFolder}
+            onCreateFolder={(options) => {
+              // Resolve which mods the move applies to here, the same way
+              // onMoveTo does, so the selection rule lives in one place.
+              if (options?.moveMods && contextMenu.mod) {
+                const targets = selectedMods.has(contextMenu.mod.path)
+                  ? Array.from(selectedMods)
+                  : [contextMenu.mod.path]
+                handleCreateFolder({ moveModPaths: targets })
+                return
+              }
+              handleCreateFolder(options)
+            }}
             folders={folders}
             onDelete={() => {
               if (contextMenu.folder) {
@@ -3875,6 +4062,8 @@ function App() {
             onDeleteTag={handleDeleteTagFromCatalog}
             gamePath={gamePath}
             holdToDelete={holdToDelete}
+            selectionCount={contextMenu.mod && selectedMods.has(contextMenu.mod.path) ? selectedMods.size : 0}
+
           />
         )
       }

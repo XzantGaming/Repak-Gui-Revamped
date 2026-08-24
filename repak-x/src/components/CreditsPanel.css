@@ -275,6 +275,9 @@
     border-radius: 999px;
     font-size: 0.8rem;
     color: var(--text-secondary);
+    text-align: center;
+    white-space: nowrap;
+    line-height: 1.4;
     transition: all 0.2s ease;
 }
 
