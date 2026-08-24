@@ -11,6 +11,7 @@
  */
 import { invoke } from '@tauri-apps/api/core'
 import { useSyncExternalStore } from 'react'
+import { uiLog } from './uiLog'
 
 export type CharacterDataEntry = {
   name: string
@@ -91,7 +92,7 @@ async function loadCache(): Promise<number> {
 
     return Object.keys(images).length
   } catch (e) {
-    console.warn('[Hero] Failed to load cached portraits:', e)
+    uiLog.error('Heroes', `Could not read the cached hero icons: ${e}`)
     return 0
   }
 }
@@ -112,11 +113,9 @@ export async function initHeroImages(): Promise<void> {
         if (result.added.length > 0 || result.updated.length > 0 || cachedCount === 0) {
           await loadCache()
         }
-        if (!result.checked) {
-          console.warn('[Hero] Portrait sync skipped:', result.message)
-        }
       } catch (e) {
-        // Offline or GitHub unreachable — the cached set stays usable.
+        // Offline or GitHub unreachable - the cached set stays usable, and the
+        // backend has already logged why.
         console.warn('[Hero] Portrait sync failed:', e)
       }
     })()
@@ -134,7 +133,7 @@ export async function refreshHeroImages(): Promise<HeroSyncResult | null> {
     await loadCache()
     return result
   } catch (e) {
-    console.warn('[Hero] Portrait refresh failed:', e)
+    uiLog.error('Heroes', `Hero icon refresh failed: ${e}`)
     return null
   }
 }

@@ -10,7 +10,8 @@
 //! File naming matches the old bundled assets — `<character id>.png`, plus
 //! `9999.png` as the unknown/multiple-heroes placeholder.
 
-use log::{info, warn};
+use crate::ui_log;
+use log::warn;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -99,9 +100,8 @@ fn emit_progress(app: &AppHandle, progress: HeroSyncProgress) {
     }
 }
 
-fn emit_log(app: &AppHandle, message: &str) {
-    let _ = app.emit("install_log", message);
-}
+/// Scope tag for this module's log drawer entries.
+const SCOPE: &str = "Heroes";
 
 /// Number of `.png` files currently cached.
 fn count_cached() -> usize {
@@ -128,6 +128,15 @@ fn count_cached() -> usize {
 /// whatever is already cached stays usable offline.
 #[tauri::command]
 pub async fn sync_hero_images(app: AppHandle, force: bool) -> Result<HeroSyncResult, String> {
+    ui_log::info(
+        SCOPE,
+        if force {
+            "Re-checking hero icons (ignoring cached listing)...".to_string()
+        } else {
+            "Checking hero icons for updates...".to_string()
+        },
+    );
+
     let cache_dir = hero_cache_dir();
     std::fs::create_dir_all(&cache_dir)
         .map_err(|e| format!("[Hero] Failed to create hero cache dir: {}", e))?;
@@ -153,9 +162,16 @@ pub async fn sync_hero_images(app: AppHandle, force: bool) -> Result<HeroSyncRes
     let resp = match req.send().await {
         Ok(r) => r,
         Err(e) => {
-            warn!("[Hero] Portrait check failed: {}", e);
+            let cached = count_cached();
+            ui_log::warn(
+                SCOPE,
+                format!(
+                    "Hero icon check failed ({}) - using {} cached icon(s)",
+                    e, cached
+                ),
+            );
             return Ok(HeroSyncResult {
-                cached: count_cached(),
+                cached,
                 checked: false,
                 message: format!("Hero portrait check failed: {}", e),
                 ..Default::default()
@@ -171,7 +187,10 @@ pub async fn sync_hero_images(app: AppHandle, force: bool) -> Result<HeroSyncRes
     if status.as_u16() == 304 {
         let cached = count_cached();
         if cached >= index.files.len() && cached > 0 {
-            info!("[Hero] Portraits already up to date (304 Not Modified)");
+            ui_log::success(
+                SCOPE,
+                format!("Hero icons are up to date ({} cached)", cached),
+            );
             return Ok(HeroSyncResult {
                 cached,
                 checked: true,
@@ -191,7 +210,14 @@ pub async fn sync_hero_images(app: AppHandle, force: bool) -> Result<HeroSyncRes
     }
 
     if !status.is_success() {
-        warn!("[Hero] Portrait check: GitHub returned status {}", status);
+        ui_log::warn(
+            SCOPE,
+            format!(
+                "Hero icon check skipped - GitHub returned {} (using {} cached icon(s))",
+                status,
+                count_cached()
+            ),
+        );
         return Ok(HeroSyncResult {
             cached: count_cached(),
             checked: false,
@@ -276,7 +302,7 @@ async fn apply_listing(
 
     let total = pending.len();
     if total > 0 {
-        emit_log(app, &format!("[Heroes] Downloading {} hero icon(s)...", total));
+        ui_log::info(SCOPE, format!("Downloading {} hero icon(s)...", total));
         emit_progress(
             app,
             HeroSyncProgress {
@@ -302,9 +328,15 @@ async fn apply_listing(
                         updated.push(item.name.clone());
                     }
                 }
-                Err(e) => failures.push(format!("write {}: {}", item.name, e)),
+                Err(e) => {
+                    ui_log::warn(SCOPE, format!("Could not save {}: {}", item.name, e));
+                    failures.push(format!("write {}: {}", item.name, e))
+                }
             },
-            Err(e) => failures.push(format!("{}: {}", item.name, e)),
+            Err(e) => {
+                ui_log::warn(SCOPE, format!("Could not download {}: {}", item.name, e));
+                failures.push(format!("{}: {}", item.name, e))
+            }
         }
 
         let current = i + 1;
@@ -327,7 +359,6 @@ async fn apply_listing(
 
     let cached = count_cached();
     let message = if !failures.is_empty() {
-        warn!("[Hero] {} portrait(s) failed to sync", failures.len());
         format!(
             "Synced {} portrait(s), {} failed: {}",
             added.len() + updated.len(),
@@ -343,12 +374,22 @@ async fn apply_listing(
             updated.len()
         )
     };
-    info!("[Hero] {} ({} cached)", message, cached);
+    if failures.is_empty() {
+        ui_log::success(SCOPE, format!("{} ({} cached)", message, cached));
+    } else {
+        ui_log::warn(
+            SCOPE,
+            format!(
+                "{} icon(s) failed to sync - {} cached icon(s) still available",
+                failures.len(),
+                cached
+            ),
+        );
+    }
 
     // Always close out a run that opened the progress bar, success or not, so
     // the drawer never keeps showing a stalled download.
     if total > 0 {
-        emit_log(app, &format!("[Heroes] {}", message));
         emit_progress(
             app,
             HeroSyncProgress {

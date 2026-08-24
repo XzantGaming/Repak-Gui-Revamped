@@ -19,6 +19,7 @@ mod p2p_stream;
 mod toast_events;
 mod uasset_api_integration;
 mod uasset_detection;
+mod ui_log;
 mod utils;
 mod utoc_utils;
 mod vfx_updater;
@@ -443,18 +444,31 @@ async fn auto_detect_game_path(
             if !mods_path.exists() {
                 if let Err(e) = std::fs::create_dir_all(&mods_path) {
                     let error_msg = format!("Failed to create ~mods directory: {}", e);
+                    ui_log::error("GamePath", &error_msg);
                     toast_events::emit_game_path_failed(&window, &error_msg);
                     return Err(error_msg);
                 }
+                ui_log::info(
+                    "GamePath",
+                    format!("Created missing mods folder: {}", mods_path.display()),
+                );
             }
 
             let mut state = state.lock().unwrap();
             state.game_path = mods_path.clone();
             save_state(&state).map_err(|e| e.to_string())?;
+            ui_log::success(
+                "GamePath",
+                format!("Detected Marvel Rivals mods folder: {}", mods_path.display()),
+            );
             Ok(mods_path.to_string_lossy().to_string())
         }
         None => {
             let error_msg = "Could not auto-detect Marvel Rivals installation".to_string();
+            ui_log::error(
+                "GamePath",
+                "Could not auto-detect Marvel Rivals - set the mods folder manually in Settings",
+            );
             toast_events::emit_game_path_failed(&window, &error_msg);
             Err(error_msg)
         }
@@ -556,13 +570,17 @@ async fn start_file_watcher(
 
 #[tauri::command]
 async fn get_pak_files(state: State<'_, Arc<Mutex<AppState>>>) -> Result<Vec<ModEntry>, String> {
+    let scan_started = std::time::Instant::now();
     let state = state.lock().unwrap();
     let game_path = &state.game_path;
 
     info!("Loading mods from: {}", game_path.display());
 
     if !game_path.exists() {
-        info!("Game path does not exist: {}", game_path.display());
+        ui_log::error(
+            "Mods",
+            format!("Mods folder does not exist: {}", game_path.display()),
+        );
         return Err(format!("Game path does not exist: {}", game_path.display()));
     }
 
@@ -696,7 +714,17 @@ async fn get_pak_files(state: State<'_, Arc<Mutex<AppState>>>) -> Result<Vec<Mod
         }
     }
 
-    info!("Found {} mod(s)", mods.len());
+    let enabled = mods.iter().filter(|m| m.enabled).count();
+    ui_log::info(
+        "Mods",
+        format!(
+            "Scanned {} mod(s) - {} enabled, {} disabled ({}ms)",
+            mods.len(),
+            enabled,
+            mods.len() - enabled,
+            scan_started.elapsed().as_millis()
+        ),
+    );
     Ok(mods)
 }
 
@@ -5155,7 +5183,15 @@ async fn get_skip_launcher_status(state: State<'_, Arc<Mutex<AppState>>>) -> Res
         Err(_) => "6".to_string(), // Default if file doesn't exist
     };
 
-    Ok(current_value == "0")
+    let enabled = current_value == "0";
+    ui_log::debug(
+        "Tools",
+        format!(
+            "Skip launcher patch: {}",
+            if enabled { "enabled" } else { "disabled" }
+        ),
+    );
+    Ok(enabled)
 }
 
 // ============================================================================
@@ -5181,13 +5217,17 @@ async fn get_sig_bypasser_status(state: State<'_, Arc<Mutex<AppState>>>) -> Resu
     let dsound_path = binaries_path.join("dsound.dll");
     let dsound_disabled_path = binaries_path.join("dsound.dll.disabled");
 
-    if dsound_path.exists() {
-        Ok("Enabled".to_string())
+    // Reported at debug because it is startup noise on a healthy install, but
+    // it is the first thing worth knowing when signed mods refuse to load.
+    let status = if dsound_path.exists() {
+        "Enabled"
     } else if dsound_disabled_path.exists() {
-        Ok("Disabled".to_string())
+        "Disabled"
     } else {
-        Ok("NotInstalled".to_string())
-    }
+        "NotInstalled"
+    };
+    ui_log::debug("Tools", format!("Signature bypass: {}", status));
+    Ok(status.to_string())
 }
 
 /// Toggle the Sig Bypasser
@@ -5268,7 +5308,7 @@ async fn recompress_mods(
         return Err("Game path does not exist".to_string());
     }
 
-    info!("Starting recompression scan in: {}", game_path.display());
+    ui_log::info("Recompress", "Scanning mods for non-Oodle compression...");
 
     let mut result = RecompressResult {
         total_scanned: 0,
@@ -5289,7 +5329,7 @@ async fn recompress_mods(
     }
 
     result.total_scanned = pak_files.len();
-    info!("Found {} PAK files to scan", pak_files.len());
+    ui_log::debug("Recompress", format!("{} PAK file(s) to check", pak_files.len()));
 
     // Emit initial progress
     let _ = window.emit(
@@ -5476,10 +5516,15 @@ async fn recompress_mods(
         }),
     );
 
-    info!(
+    let summary = format!(
         "Recompression complete: {} scanned, {} already Oodle, {} recompressed, {} failed",
         result.total_scanned, result.already_oodle, result.recompressed, result.failed
     );
+    if result.failed > 0 {
+        ui_log::warn("Recompress", summary);
+    } else {
+        ui_log::success("Recompress", summary);
+    }
 
     Ok(result)
 }
@@ -5631,6 +5676,8 @@ async fn set_last_seen_version(version: String) -> Result<bool, String> {
 /// Check for application updates and emit update_available event when found
 #[tauri::command]
 async fn check_for_updates(window: Window) -> Result<Option<UpdateInfo>, String> {
+    ui_log::info("Update", "Checking for a newer Repak-X release...");
+
     let client = reqwest::Client::new();
     let url = "https://api.github.com/repos/XzantGaming/Repak-X/releases/latest";
 
@@ -5639,9 +5686,16 @@ async fn check_for_updates(window: Window) -> Result<Option<UpdateInfo>, String>
         .header("User-Agent", "RepakX")
         .send()
         .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+        .map_err(|e| {
+            ui_log::warn("Update", format!("Update check failed: {}", e));
+            format!("Request failed: {}", e)
+        })?;
 
     if !res.status().is_success() {
+        ui_log::warn(
+            "Update",
+            format!("Update check skipped - GitHub returned {}", res.status()),
+        );
         return Ok(None);
     }
 
@@ -5743,12 +5797,16 @@ async fn check_for_updates(window: Window) -> Result<Option<UpdateInfo>, String>
 
             // Emit update_available event
             let _ = window.emit("update_available", &update_info);
-            info!("Emitted update_available event for version {}", tag_name);
+            ui_log::warn(
+                "Update",
+                format!("Update available: v{} (running v{})", tag_name, current),
+            );
 
             return Ok(Some(update_info));
         }
     }
 
+    ui_log::success("Update", format!("Repak-X v{} is up to date", current));
     Ok(None)
 }
 
@@ -6520,16 +6578,21 @@ async fn monitor_game_for_crashes(
         let now = std::time::SystemTime::now();
         *game_start_time = Some(now);
         *last_checked = Some(now);
-        info!("Game started - monitoring for crashes from: {:?}", now);
+        ui_log::info("Game", "Marvel Rivals started - watching for crashes");
         return Ok(None);
     }
 
     // Game just stopped - check for crashes that occurred during THIS session
     if !game_running && game_start_time.is_some() {
         let session_start = game_start_time.unwrap();
-        info!(
-            "Game stopped - checking for crashes since session start: {:?}",
-            session_start
+        let played_secs = session_start.elapsed().map(|d| d.as_secs()).unwrap_or(0);
+        ui_log::info(
+            "Game",
+            format!(
+                "Marvel Rivals closed after {}m {}s - checking for crashes...",
+                played_secs / 60,
+                played_secs % 60
+            ),
         );
 
         // Check for crashes created AFTER the game started
@@ -6539,12 +6602,12 @@ async fn monitor_game_for_crashes(
         *game_start_time = None;
 
         if !new_crashes.is_empty() {
-            error!("⚠️ ═══════════════════════════════════════════════════════════════");
-            error!("⚠️ CRASH DETECTED! Marvel Rivals crashed during this session!");
-            error!("⚠️ ═══════════════════════════════════════════════════════════════");
-            error!(
-                "⚠️ Found {} crash folder(s) from this session",
-                new_crashes.len()
+            ui_log::error(
+                "Game",
+                format!(
+                    "Marvel Rivals crashed - {} crash report(s) from this session",
+                    new_crashes.len()
+                ),
             );
 
             // Parse the most recent crash
@@ -6555,10 +6618,16 @@ async fn monitor_game_for_crashes(
                     let unknown_error = "Unknown error".to_string();
                     let error_msg = info.error_message.as_ref().unwrap_or(&unknown_error);
 
-                    error!("⚠️ Crash Details:");
-                    error!(
-                        "⚠️   Type: {}",
-                        info.crash_type.as_ref().unwrap_or(&"Unknown".to_string())
+                    // These lines are the whole point of the drawer for a
+                    // crash: they are what a user is asked to paste when they
+                    // report one, and digging them out of repakx.log was the
+                    // step that never happened.
+                    ui_log::error(
+                        "Crash",
+                        format!(
+                            "Type: {}",
+                            info.crash_type.as_deref().unwrap_or("Unknown")
+                        ),
                     );
 
                     // Parse and display detailed error information
@@ -6566,48 +6635,53 @@ async fn monitor_game_for_crashes(
                         crash_monitor::parse_error_details(error_msg);
 
                     if let Some(err_type) = error_type {
-                        error!("⚠️   Error Type: {}", err_type);
+                        ui_log::error("Crash", format!("Error: {}", err_type));
                     }
 
                     if let Some(asset) = asset_path {
-                        error!("⚠️   Affected Asset: {}", asset);
+                        ui_log::error("Crash", format!("Asset: {}", asset));
 
                         // Extract character ID if present
                         if let Some(char_id) = crash_monitor::extract_character_id(error_msg) {
-                            error!("⚠️   Character ID: {}", char_id);
+                            let name = character_data::get_character_name_from_id(&char_id)
+                                .unwrap_or_else(|| "unknown hero".to_string());
+                            ui_log::error(
+                                "Crash",
+                                format!("Character: {} ({})", name, char_id),
+                            );
                         }
                     }
 
                     if let Some(detail) = details {
-                        error!("⚠️   Details: {}", detail);
+                        ui_log::error("Crash", format!("Details: {}", detail));
                     }
 
                     // Check if it's a mesh-related crash
                     if crash_monitor::is_mesh_related_crash(error_msg) {
-                        error!("⚠️   ⚡ MESH LOADING ERROR detected");
+                        ui_log::error(
+                            "Crash",
+                            "Mesh loading error - a mod's mesh is incompatible with the current game build",
+                        );
                     }
 
                     if let Some(seconds) = info.seconds_since_start {
-                        let minutes = seconds / 60;
-                        let secs = seconds % 60;
-                        error!("⚠️   Time in game: {}m {}s", minutes, secs);
+                        ui_log::debug(
+                            "Crash",
+                            format!("Time in game: {}m {}s", seconds / 60, seconds % 60),
+                        );
                     }
 
-                    error!("⚠️   Crash folder: {:?}", crash_folder);
-                    error!("⚠️   Mods enabled: {} mod(s)", info.enabled_mods.len());
+                    ui_log::debug("Crash", format!("Crash folder: {}", crash_folder.display()));
+                    ui_log::error(
+                        "Crash",
+                        format!("{} mod(s) were enabled", info.enabled_mods.len()),
+                    );
 
-                    if !info.enabled_mods.is_empty() {
-                        error!("⚠️   Active mods:");
-                        for mod_name in &info.enabled_mods {
-                            error!("⚠️     - {}", mod_name);
-                        }
+                    for mod_name in &info.enabled_mods {
+                        ui_log::debug("Crash", format!("  enabled: {}", mod_name));
                     }
 
-                    // Show full error message at the end for reference
-                    error!("⚠️");
-                    error!("⚠️   Full Error Message:");
-                    error!("⚠️   {}", error_msg);
-                    error!("⚠️ ═══════════════════════════════════════════════════════════════");
+                    ui_log::debug("Crash", format!("Full error: {}", error_msg));
 
                     // Update last checked time to avoid re-reporting this crash
                     *last_checked = Some(info.timestamp);
@@ -6619,9 +6693,7 @@ async fn monitor_game_for_crashes(
                 return Ok(crash_info);
             }
         } else {
-            info!("✓ ═══════════════════════════════════════════════════════════════");
-            info!("✓ Game closed normally - no crashes detected this session");
-            info!("✓ ═══════════════════════════════════════════════════════════════");
+            ui_log::success("Game", "Game closed normally - no crashes this session");
         }
     }
 
@@ -6644,17 +6716,20 @@ async fn check_for_previous_crash(
     let crash_info = crash_monitor::check_for_previous_session_crash(last_known.as_deref());
 
     if let Some(ref info) = crash_info {
-        error!("⚠️ ═══════════════════════════════════════════════════════════════");
-        error!("⚠️ PREVIOUS SESSION CRASH DETECTED!");
-        error!("⚠️ ═══════════════════════════════════════════════════════════════");
-        error!("⚠️ Crash folder: {:?}", info.crash_folder);
+        ui_log::error("Crash", "Marvel Rivals crashed during a previous session");
+        ui_log::debug(
+            "Crash",
+            format!("Crash folder: {}", info.crash_folder.display()),
+        );
 
         if let Some(ref err_msg) = info.error_message {
-            error!("⚠️ Error: {}", err_msg);
+            ui_log::error("Crash", err_msg.clone());
         }
 
         // Emit toast notification
         toast_events::emit_crash_from_info(&window, info);
+    } else {
+        ui_log::debug("Crash", "No unreported crashes from previous sessions");
     }
 
     // Update last known crash folder to the newest one (whether crash detected or not)
@@ -6746,40 +6821,34 @@ async fn refresh_character_cache() -> Result<String, String> {
 /// Supports cancellation via cancel_character_update command
 #[tauri::command]
 async fn update_character_data_from_github(window: Window) -> Result<usize, String> {
-    let _ = window.emit(
-        "install_log",
-        "[Character Data] Starting GitHub data fetch...",
-    );
+    ui_log::info("CharDB", "Manual update requested - fetching from GitHub...");
 
-    // Create progress callback that emits events
-    let window_clone = window.clone();
     let on_progress = move |msg: &str| {
-        let _ = window_clone.emit("install_log", format!("[Character Data] {}", msg));
+        // Step-by-step chatter is debug: useful when a fetch stalls, noise when
+        // it does not. The drawer's level filter decides which it is.
+        ui_log::debug("CharDB", msg);
     };
 
     match character_data::update_from_github_with_progress(on_progress).await {
         Ok(new_count) => {
-            let msg = format!(
-                "[Character Data] ✓ Complete! {} new skins added.",
-                new_count
+            ui_log::success(
+                "CharDB",
+                format!(
+                    "Character database updated: {} new skin(s) ({} total)",
+                    new_count,
+                    character_data::get_all_character_data().len()
+                ),
             );
-            let _ = window.emit("install_log", &msg);
             // Trigger mod list refresh so new character names show up
             let _ = window.emit("character_data_updated", new_count);
-            info!(
-                "Successfully updated character data. {} new skins added.",
-                new_count
-            );
             Ok(new_count)
         }
         Err(e) if e == "Cancelled" => {
-            let _ = window.emit("install_log", "[Character Data] ✗ Update cancelled by user");
+            ui_log::warn("CharDB", "Character database update cancelled");
             Err(e)
         }
         Err(e) => {
-            let msg = format!("[Character Data] ✗ Error: {}", e);
-            let _ = window.emit("install_log", &msg);
-            error!("Failed to update character data: {}", e);
+            ui_log::error("CharDB", format!("Character database update failed: {}", e));
             Err(e)
         }
     }
@@ -6789,7 +6858,7 @@ async fn update_character_data_from_github(window: Window) -> Result<usize, Stri
 #[tauri::command]
 async fn cancel_character_update() -> Result<(), String> {
     character_data::request_cancel_update();
-    info!("Character data update cancellation requested");
+    ui_log::warn("CharDB", "Cancelling character database update...");
     Ok(())
 }
 
@@ -6846,6 +6915,45 @@ fn load_state() -> AppState {
     };
 
     state
+}
+
+/// Opening block of the log drawer: the facts every support conversation opens
+/// by asking for. Emitted from `setup()` into the replay buffer, so it is the
+/// first thing the drawer shows once the webview mounts.
+fn emit_session_banner(app: &tauri::App) {
+    let version = app.package_info().version.to_string();
+    ui_log::info("Startup", format!("Repak-X v{} starting", version));
+    ui_log::debug(
+        "Startup",
+        format!("Platform: {} {}", std::env::consts::OS, std::env::consts::ARCH),
+    );
+
+    let mods_dir = app
+        .try_state::<Arc<Mutex<AppState>>>()
+        .and_then(|state| state.lock().ok().map(|s| s.game_path.clone()));
+
+    match mods_dir {
+        Some(path) if path.as_os_str().is_empty() => {
+            ui_log::warn("Startup", "No mods folder configured yet");
+        }
+        Some(path) if !path.exists() => {
+            ui_log::warn(
+                "Startup",
+                format!("Mods folder is missing: {}", path.display()),
+            );
+        }
+        Some(path) => {
+            ui_log::info("Startup", format!("Mods folder: {}", path.display()));
+        }
+        None => {
+            ui_log::warn("Startup", "Could not read the saved mods folder");
+        }
+    }
+
+    ui_log::debug(
+        "Startup",
+        format!("Log file: {}", log_dir().join("repakx.log").display()),
+    );
 }
 
 fn setup_logging() {
@@ -7136,12 +7244,14 @@ async fn check_mod_clashes(
 ) -> Result<Vec<ModClash>, String> {
     use std::collections::HashMap;
 
+    let started = std::time::Instant::now();
     let state = state.lock().unwrap();
     let game_path = &state.game_path;
 
-    info!("Checking for mod clashes...");
+    ui_log::info("Conflicts", "Checking enabled mods for file conflicts...");
 
     if !game_path.exists() {
+        ui_log::error("Conflicts", "Mods folder does not exist - cannot check conflicts");
         return Err("Game path does not exist".to_string());
     }
 
@@ -7211,7 +7321,14 @@ async fn check_mod_clashes(
             ) {
                 Ok(f) => f,
                 Err(e) => {
-                    warn!("Failed to read PAK {:?}: {}", path, e);
+                    ui_log::warn(
+                        "Conflicts",
+                        format!(
+                            "Skipped unreadable PAK {}: {}",
+                            path.file_name().unwrap_or_default().to_string_lossy(),
+                            e
+                        ),
+                    );
                     continue;
                 }
             }
@@ -7224,7 +7341,8 @@ async fn check_mod_clashes(
         });
     }
 
-    info!("Analyzed {} enabled mods", mods_info.len());
+    let analyzed = mods_info.len();
+    ui_log::debug("Conflicts", format!("Analyzed {} enabled mod(s)", analyzed));
 
     // Don't group by character - instead, compare all mods at the same priority level
     // Group by priority first
@@ -7322,7 +7440,26 @@ async fn check_mod_clashes(
             }
         }
     }
-    info!("Found {} clashes", clashes.len());
+    if clashes.is_empty() {
+        ui_log::success(
+            "Conflicts",
+            format!(
+                "No conflicts found across {} enabled mod(s) ({}ms)",
+                analyzed,
+                started.elapsed().as_millis()
+            ),
+        );
+    } else {
+        ui_log::warn(
+            "Conflicts",
+            format!(
+                "Found {} conflict(s) across {} enabled mod(s) ({}ms)",
+                clashes.len(),
+                analyzed,
+                started.elapsed().as_millis()
+            ),
+        );
+    }
     Ok(clashes)
 }
 
@@ -7516,12 +7653,25 @@ async fn p2p_start_sharing(
     p2p_state: State<'_, P2PState>,
 ) -> Result<p2p_libp2p::ShareInfo, String> {
     let paths: Vec<PathBuf> = mod_paths.iter().map(PathBuf::from).collect();
+    ui_log::info(
+        "P2P",
+        format!("Sharing \"{}\" ({} mod(s))...", name, paths.len()),
+    );
 
-    p2p_state
+    match p2p_state
         .manager
-        .start_sharing(name, description, paths, creator)
+        .start_sharing(name.clone(), description, paths, creator)
         .await
-        .map_err(|e| e.to_string())
+    {
+        Ok(info) => {
+            ui_log::success("P2P", format!("Sharing \"{}\" - waiting for peers", name));
+            Ok(info)
+        }
+        Err(e) => {
+            ui_log::error("P2P", format!("Could not start sharing \"{}\": {}", name, e));
+            Err(e.to_string())
+        }
+    }
 }
 
 /// Stop sharing
@@ -7530,6 +7680,7 @@ async fn p2p_stop_sharing(
     share_code: String,
     p2p_state: State<'_, P2PState>,
 ) -> Result<(), String> {
+    ui_log::info("P2P", "Stopped sharing");
     p2p_state
         .manager
         .stop_sharing(&share_code)
@@ -7583,13 +7734,28 @@ async fn p2p_start_receiving(
         Some(ref id) if !id.is_empty() => game_path.join(id),
         _ => game_path,
     };
-    info!("[P2P] Receive destination: {}", output_dir.display());
+    ui_log::info(
+        "P2P",
+        format!("Connecting to peer - saving to {}", output_dir.display()),
+    );
 
-    p2p_state
+    match p2p_state
         .manager
         .start_receiving(&connection_string, output_dir, client_name, window)
         .await
-        .map_err(|e| e.to_string())
+    {
+        Ok(()) => {
+            ui_log::success("P2P", "Connected - transfer started");
+            Ok(())
+        }
+        Err(e) => {
+            // Leaving the watcher paused would silently stop the mod list from
+            // refreshing for the rest of the session.
+            watcher_state.paused.store(false, Ordering::Relaxed);
+            ui_log::error("P2P", format!("Could not connect to peer: {}", e));
+            Err(e.to_string())
+        }
+    }
 }
 
 /// Stop receiving
@@ -7604,7 +7770,7 @@ async fn p2p_stop_receiving(
 
     // Unpause file watcher and emit one refresh so the mod list picks up new files
     watcher_state.paused.store(false, Ordering::Relaxed);
-    info!("[P2P] File watcher resumed after transfer");
+    ui_log::info("P2P", "Transfer stopped");
     let _ = window.emit("mods_dir_changed", ());
 
     Ok(())
@@ -7784,34 +7950,48 @@ fn handle_deep_link_url(url: &str, app_handle: &tauri::AppHandle) {
                     .unwrap_or(file_path.clone().into())
                     .to_string();
 
-                info!("Received mod file from extension: {}", decoded_path);
-
                 let path = std::path::Path::new(&decoded_path);
+                let file_name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| decoded_path.clone());
+
                 if path.exists() {
+                    ui_log::info(
+                        "Extension",
+                        format!("Received \"{}\" from the browser extension", file_name),
+                    );
                     if let Err(e) = app_handle.emit("extension-mod-received", &decoded_path) {
-                        error!("Failed to emit extension-mod-received event: {}", e);
-                    } else {
-                        info!("Emitted extension-mod-received event for: {}", decoded_path);
+                        ui_log::error(
+                            "Extension",
+                            format!("Could not hand \"{}\" to the UI: {}", file_name, e),
+                        );
                     }
                 } else {
-                    warn!("Deep link file does not exist: {}", decoded_path);
+                    ui_log::error(
+                        "Extension",
+                        format!("Extension sent a file that no longer exists: {}", decoded_path),
+                    );
                     let _ = app_handle.emit(
                         "extension-mod-error",
                         format!("File not found: {}", decoded_path),
                     );
                 }
             } else {
-                warn!("Deep link URL missing 'file' parameter: {}", url);
+                ui_log::warn("Extension", format!("Ignored malformed extension link: {}", url));
             }
         } else {
-            warn!(
-                "Unknown deep link action: scheme={}, host={:?}",
-                parsed.scheme(),
-                parsed.host_str()
+            ui_log::warn(
+                "Extension",
+                format!(
+                    "Ignored unknown link action: scheme={}, host={:?}",
+                    parsed.scheme(),
+                    parsed.host_str()
+                ),
             );
         }
     } else {
-        error!("Failed to parse deep link URL: {}", url);
+        ui_log::error("Extension", format!("Could not parse link: {}", url));
     }
 }
 
@@ -7908,16 +8088,21 @@ fn main() {
             let accent_color = state_guard.accent_color.clone();
             std::thread::spawn(move || {
                 if let Err(e) = discord_manager.connect() {
-                    warn!("Failed to auto-connect Discord RPC: {}", e);
+                    // Discord not running is the usual cause and is harmless,
+                    // so this stays a warning rather than an error.
+                    ui_log::warn("Discord", format!("Rich Presence unavailable: {}", e));
                 } else {
-                    info!("Auto-connected Discord RPC from saved settings");
+                    ui_log::debug("Discord", "Rich Presence connected");
 
                     // Apply saved theme
                     discord_manager.set_theme(accent_color.as_str());
 
                     // Set initial activity
                     if let Err(e) = discord_manager.set_idle() {
-                        warn!("Failed to set initial Discord RPC activity: {}", e);
+                        ui_log::warn(
+                            "Discord",
+                            format!("Could not set Rich Presence status: {}", e),
+                        );
                     }
                 }
             });
@@ -7962,13 +8147,24 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_deep_link::init())
         .setup(|app| {
+            // Wire the drawer's log bus before anything else in setup runs, so
+            // the startup checks below are captured instead of emitted into a
+            // void. Entries land in a replay buffer until the webview mounts.
+            ui_log::init(app.handle().clone());
+            emit_session_banner(app);
+
             #[cfg(any(windows, target_os = "linux"))]
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
                 if let Err(e) = app.deep_link().register("repakx") {
                     warn!("Failed to register repakx:// protocol: {}", e);
+                    ui_log::warn(
+                        "Startup",
+                        format!("Browser extension link handler unavailable: {}", e),
+                    );
                 } else {
                     info!("Successfully registered repakx:// protocol handler");
+                    ui_log::debug("Startup", "repakx:// protocol handler registered");
                 }
             }
 
@@ -8087,6 +8283,10 @@ fn main() {
             identify_mod_character,
             get_character_data_path,
             refresh_character_cache,
+            // Log drawer
+            ui_log::get_ui_log_backlog,
+            ui_log::get_app_log_path,
+            ui_log::export_ui_logs,
             // P2P sharing commands
             p2p_start_sharing,
             p2p_stop_sharing,

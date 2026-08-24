@@ -55,6 +55,14 @@ import Switch from './components/ui/Switch'
 import NumberInput from './components/ui/NumberInput'
 import characterDataStatic from './data/character_data.json'
 import { initHeroImages } from './utils/heroImages'
+import {
+  clearLogs,
+  getLogEntries,
+  initLogBridge,
+  subscribeToLogs,
+  uiLog,
+  type LogEntry
+} from './utils/uiLog'
 import { useStableCallback } from './hooks/useStableCallback'
 import './App.css'
 import './styles/theme.css'
@@ -333,7 +341,9 @@ function App() {
 
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const [modsToInstall, setModsToInstall] = useState<any[]>([])
-  const [installLogs, setInstallLogs] = useState<string[]>([])
+  // Mirror of the log bus (see utils/uiLog.ts). The bus owns the entries so any
+  // component can log without prop drilling; App only re-renders the drawer.
+  const [installLogs, setInstallLogs] = useState<LogEntry[]>(() => getLogEntries())
   const [modLoadingProgress, setModLoadingProgress] = useState(0) // 0-100 for progress, -1 for indeterminate
   const [isModsLoading, setIsModsLoading] = useState(false) // Track if mods are being loaded
   // Non-null only while hero portraits are downloading (see 'hero_sync_progress')
@@ -641,7 +651,7 @@ function App() {
       })
     } catch (error) {
       setStatus('Error checking clashes: ' + error)
-      console.error('[Conflicts] Global conflict check failed:', error)
+      uiLog.error('Conflicts', `Conflict check failed: ${error}`)
     }
   }
 
@@ -657,7 +667,7 @@ function App() {
         alert.success('Up to Date', 'You are running the latest version.');
       }
     } catch (error) {
-      console.error('Failed to check for updates:', error);
+      uiLog.warn('Update', `Update check failed: ${error}`);
       if (!silent) {
         alert.error('Update Check Failed', String(error));
       }
@@ -1136,7 +1146,7 @@ function App() {
       console.debug('[UpdateMod] Completed update flow; relying on backend named success toast')
 
     } catch (e) {
-      console.error('Update failed:', e)
+      uiLog.error('Mods', `Could not update ${mod.custom_name || 'mod'}: ${e}`)
       alert.error('Update Failed', String(e))
     } finally {
       setIsModsLoading(false)
@@ -1144,19 +1154,53 @@ function App() {
     }
   }
 
+  // Bridge the log drawer to the backend. Kept in its own effect and mounted
+  // first so the Rust-side startup banner and character/hero checks - which run
+  // before the webview exists - are replayed into the drawer rather than lost.
   useEffect(() => {
-    loadInitialData().then((modCount) => {
-      invoke('get_app_settings')
-        .then((settings: any) => {
-          if (settings.enableDrp) {
-            invoke('discord_connect')
-              .then(() => invoke('discord_set_managing_mods', { modCount }))
-              .catch(console.warn);
-          }
-        })
-        .catch(console.warn);
-    });
-    loadTags()
+    const unsubscribe = subscribeToLogs(setInstallLogs)
+    let unlistenBridge: (() => void) | null = null
+    let cancelled = false
+
+    initLogBridge()
+      .then((unlisten) => {
+        if (cancelled) unlisten()
+        else unlistenBridge = unlisten
+      })
+      .catch(err => console.error('Failed to attach the log bridge:', err))
+
+    return () => {
+      cancelled = true
+      unsubscribe()
+      unlistenBridge?.()
+    }
+  }, [])
+
+  // StrictMode double-invokes mount effects in development. The listeners in
+  // the effect below must re-register on the second pass (their cleanup tore
+  // them down), but the one-shot startup work must not: it was running two full
+  // disk scans, two GitHub round-trips and duplicating every startup line in
+  // the log drawer.
+  const startupRanRef = useRef(false)
+
+  useEffect(() => {
+    const isFirstRun = !startupRanRef.current
+    startupRanRef.current = true
+
+    if (isFirstRun) {
+      loadInitialData().then((modCount) => {
+        invoke('get_app_settings')
+          .then((settings: any) => {
+            if (settings.enableDrp) {
+              invoke('discord_connect')
+                .then(() => invoke('discord_set_managing_mods', { modCount }))
+                .catch(console.warn);
+            }
+          })
+          .catch(console.warn);
+      });
+      loadTags()
+    }
 
     // Listen for install progress
     const unlisten = listen('install_progress', (event: any) => {
@@ -1167,15 +1211,13 @@ function App() {
     })
 
     const unlistenComplete = listen('install_complete', () => {
+      uiLog.success('Install', 'Installation complete')
       setStatus('Installation complete!')
       setIsModsLoading(false)
       setModLoadingProgress(0)
       loadMods()
     })
 
-    const unlistenLogs = listen('install_log', (event: any) => {
-      setInstallLogs((prev) => [...prev, String(event.payload)])
-    })
 
     // Hero portrait downloads report into the same drawer progress bar.
     // Only fires when there is something to fetch (first run, or a hero added
@@ -1196,7 +1238,7 @@ function App() {
         const data = await invoke('get_character_data') as any
         setCharacterData(data)
       } catch (err) {
-        console.error('Failed to refresh character data:', err)
+        uiLog.error('CharDB', `Could not refresh the character database: ${err}`)
       }
       loadMods()
     })
@@ -1217,7 +1259,7 @@ function App() {
 
     // Listen for extension mod errors
     const unlistenExtensionError = listen('extension-mod-error', (event: any) => {
-      console.error('Extension mod error:', event.payload)
+      uiLog.error('Extension', String(event.payload))
       alert.error('Extension Error', event.payload)
     })
 
@@ -1250,19 +1292,13 @@ function App() {
         action: {
           label: 'Details',
           onClick: () => {
-            const report = [
-              '--- CRASH REPORT ---',
-              `Timestamp: ${new Date().toLocaleString()}`,
-              `Type: ${payload.crash_type || 'Unknown'}`,
-              `Error: ${payload.error_message || 'N/A'}`,
-              `Asset: ${payload.asset_path || 'N/A'}`,
-              `Is Mesh Crash: ${payload.is_mesh_crash ? 'Yes' : 'No'}`,
-              '-------------------',
-              'Full Details for dev debugging:',
-              JSON.stringify(payload, null, 2),
-              '-------------------'
-            ]
-            setInstallLogs(report)
+            // Appended, not assigned. Replacing the entries threw away the
+            // install and startup history that explains the crash.
+            uiLog.error('Crash', `Type: ${payload.crash_type || 'Unknown'}`)
+            uiLog.error('Crash', `Error: ${payload.error_message || 'N/A'}`)
+            uiLog.error('Crash', `Asset: ${payload.asset_path || 'N/A'}`)
+            uiLog.error('Crash', `Mesh crash: ${payload.is_mesh_crash ? 'yes' : 'no'}`)
+            uiLog.debug('Crash', `Full payload: ${JSON.stringify(payload)}`)
             setIsLogDrawerOpen(true)
             alert.info('Crash Details', 'Report opened in Log Drawer.')
           }
@@ -1280,9 +1316,11 @@ function App() {
     })
 
     // Check for crashes from previous game sessions
-    invoke('check_for_previous_crash').catch(err => {
-      console.error('Failed to check for previous crashes:', err)
-    })
+    if (isFirstRun) {
+      invoke('check_for_previous_crash').catch(err => {
+        uiLog.error('Crash', `Could not check for previous crashes: ${err}`)
+      })
+    }
 
     // Listen for Tauri drag-drop event
     const unlistenDragDrop = listen('tauri://drag-drop', (event: any) => {
@@ -1314,7 +1352,6 @@ function App() {
       unlistenCharUpdate.then(f => f())
       unlistenDragDrop.then(f => f())
       unlistenFileDrop.then(f => f())
-      unlistenLogs.then(f => f())
       unlistenDirChanged.then(f => f())
       unlistenExtensionMod.then(f => f())
       unlistenExtensionError.then(f => f())
@@ -1507,6 +1544,7 @@ function App() {
           }
 
           if (releaseBody) {
+            uiLog.info('Changelog', `Updated from v${lastSeen} to ${ver} - showing changelog`)
             setChangelogContent(releaseBody)
             setShowChangelogModal(true)
             console.debug('[Changelog] Showing changelog modal', {
@@ -1522,7 +1560,7 @@ function App() {
             })
           }
         } catch (err) {
-          console.warn('[Changelog] Failed to fetch changelog after update:', err)
+          uiLog.warn('Changelog', `Could not fetch the changelog for this version: ${err}`)
         }
       } else {
         console.debug('[Changelog] Skipping changelog check on startup', {
@@ -1543,8 +1581,9 @@ function App() {
       try {
         const charData = await invoke('get_character_data') as any
         setCharacterData(charData)
+        uiLog.debug('CharDB', `Loaded ${charData?.length ?? 0} character skin(s)`)
       } catch (charErr) {
-        console.error('Failed to fetch character data:', charErr)
+        uiLog.error('CharDB', `Could not load the character database: ${charErr}`)
       }
 
       // Hero portraits live in rivals-resources and are cached in appdata.
@@ -1556,11 +1595,16 @@ function App() {
       await loadFolders()
       await checkGame()
 
+      // Fire and forget: each command logs its own status, and neither result
+      // is needed here.
+      void invoke('get_sig_bypasser_status').catch(() => { })
+      void invoke('get_skip_launcher_status').catch(() => { })
+
       // Start the file watcher
       await invoke('start_file_watcher')
       return modList.length
     } catch (error) {
-      console.error('Failed to load initial data:', error)
+      uiLog.error('Startup', `Startup failed partway through: ${error}`)
       return 0
     }
   }
@@ -1587,7 +1631,7 @@ function App() {
       setStatus(`Loaded ${modList.length} mod(s)`)
       return modList as ModRecord[]
     } catch (error) {
-      console.error('Error loading mods:', error)
+      uiLog.error('Mods', `Could not load the mod list: ${error}`)
       setStatus('Error loading mods: ' + error)
       return []
     } finally {
@@ -1752,6 +1796,7 @@ function App() {
       if (selected) {
         await invoke('set_game_path', { path: selected })
         setGamePath(selected)
+        uiLog.info('GamePath', `Mods folder set to ${selected}`)
         setStatus('Game path set: ' + selected)
         await loadMods()
         await loadFolders()
@@ -2861,7 +2906,10 @@ function App() {
 
   const handleInstallMods = async (modsWithSettings: InstallModPayload[]) => {
     setPanel('install', false)
-    setInstallLogs([])
+    // Deliberately not cleared: the startup diagnostics above are exactly the
+    // context a failed install needs, and wiping them here meant a bug report
+    // never contained them. The user can still clear the drawer by hand.
+    uiLog.info('Install', `Installing ${modsWithSettings.length} mod(s)...`)
 
     // Update DRP status to Installing
     invoke('discord_set_installing').catch(console.warn)
@@ -3084,6 +3132,9 @@ function App() {
     setStatus('Settings saved');
   }
 
+  /** Guards the startup update check against StrictMode's replay (see above). */
+  const updateCheckRanRef = useRef(false)
+
   // Add this effect to initialize theme and view settings
   useEffect(() => {
     // Load App Settings from backend state.json
@@ -3129,15 +3180,19 @@ function App() {
         if (settings.launcherType) setLauncherType(settings.launcherType);
 
         // 5. Run auto update check if enabled
-        if (settings.autoCheckUpdates) {
-          console.debug('[Updates] Running startup auto-check for updates');
-          void handleCheckForUpdates(true);
-        } else {
-          console.debug('[Updates] Skipping startup auto-check (disabled in settings)');
+        // Applying the settings above is idempotent, so it is safe under a
+        // StrictMode replay; hitting the GitHub releases API is not.
+        if (!updateCheckRanRef.current) {
+          updateCheckRanRef.current = true;
+          if (settings.autoCheckUpdates) {
+            void handleCheckForUpdates(true);
+          } else {
+            uiLog.debug('Update', 'Startup update check is disabled in Settings');
+          }
         }
       })
       .catch((err) => {
-        console.error('Failed to load app settings from backend:', err);
+        uiLog.error('Startup', `Could not load app settings: ${err}`);
       });
 
     const hasSeenTour = localStorage.getItem('hasSeenOnboarding');
@@ -3986,7 +4041,7 @@ function App() {
         // work and only takes it over when nothing else is using it.
         status={!isModsLoading && heroSyncProgress ? heroSyncProgress.message : status}
         logs={installLogs}
-        onClear={() => setInstallLogs([])}
+        onClear={clearLogs}
         progress={!isModsLoading && heroSyncProgress ? heroSyncProgress.percent : modLoadingProgress}
         isLoading={isModsLoading || heroSyncProgress !== null}
         isOpen={isLogDrawerOpen}

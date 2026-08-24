@@ -10,6 +10,7 @@ import { FaToolbox } from "react-icons/fa6";
 import { MdRemoveModerator } from "react-icons/md";
 import { IconType } from 'react-icons';
 import Progress from './ui/Progress';
+import { uiLog } from '../utils/uiLog';
 import './SettingsPanel.css'; // Reuse the same styles
 import './ToolsPanel.css';
 
@@ -139,6 +140,8 @@ export default function ToolsPanel({ onClose }: ToolsPanelProps) {
             const count = await invoke('update_character_data_from_github') as any;
             setCharUpdateStatus(`Successfully updated! ${count} new skins added.`);
         } catch (error) {
+            // The backend already logs its own failure detail; this covers the
+            // case where the invoke itself never reached it.
             setCharUpdateStatus(`Error: ${error}`);
         } finally {
             setIsUpdatingChars(false);
@@ -152,12 +155,14 @@ export default function ToolsPanel({ onClose }: ToolsPanelProps) {
             // Toggle the skip launcher patch
             const isEnabled = await invoke('skip_launcher_patch') as any;
             setIsLauncherPatchEnabled(isEnabled);
+            uiLog.info('Tools', `Skip launcher ${isEnabled ? 'enabled' : 'disabled'}`);
             setSkipLauncherStatus(
                 isEnabled
                     ? 'Skip launcher enabled (launch_record = 0)'
                     : 'Skip launcher disabled (launch_record = 6)'
             );
         } catch (error) {
+            uiLog.error('Tools', `Could not toggle skip launcher: ${error}`);
             setSkipLauncherStatus(`Error: ${error}`);
         } finally {
             setIsSkippingLauncher(false);
@@ -170,12 +175,14 @@ export default function ToolsPanel({ onClose }: ToolsPanelProps) {
         try {
             const newStatus = await invoke('toggle_sig_bypasser') as string;
             setSigBypasserState(newStatus);
+            uiLog.info('Tools', `Signature bypass is now ${newStatus.toLowerCase()}`);
             setSigBypasserStatusMsg(
                 newStatus === 'Enabled'
                     ? 'Sig Bypasser enabled'
                     : 'Sig Bypasser disabled'
             );
         } catch (error) {
+            uiLog.error('Tools', `Could not toggle the signature bypass: ${error}`);
             setSigBypasserStatusMsg(`Error: ${error}`);
         } finally {
             setIsTogglingSigBypasser(false);
@@ -199,6 +206,7 @@ export default function ToolsPanel({ onClose }: ToolsPanelProps) {
                 setRecompressStatus(`Scanned ${result.total_scanned} mods - ${result.already_oodle} already compressed`);
             }
         } catch (error) {
+            uiLog.error('Recompress', `Recompression failed: ${error}`);
             setRecompressStatus(`Error: ${error}`);
         } finally {
             setIsRecompressing(false);

@@ -2,6 +2,7 @@
 // Handles external character_data.json in roaming folder with caching for performance
 // Fetches updates from GitHub MarvelRivalsCharacterIDs repository
 
+use crate::ui_log;
 use log::{info, warn};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -10,6 +11,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
+
+/// Scope tag for this module's log drawer entries.
+const SCOPE: &str = "CharDB";
 
 // === CHARACTER UPDATE CANCELLATION FLAG ===
 // Global flag to signal cancellation of the character data fetch
@@ -829,33 +833,69 @@ fn should_check_for_update() -> bool {
 /// of newly-added skins if an update was performed and it added anything.
 pub async fn check_for_update_on_launch() -> Option<usize> {
     if !should_check_for_update() {
-        info!("Skipping character data auto-update check (checked recently)");
+        // Reported rather than skipped silently: "it never checks" was the
+        // impression this branch left, because nothing said the check had
+        // already happened.
+        ui_log::info(
+            SCOPE,
+            match hours_until_next_check() {
+                Some(0) => "Character database checked recently, next check due shortly".to_string(),
+                Some(hours) => format!(
+                    "Character database checked recently, next check in ~{}h",
+                    hours
+                ),
+                None => "Character database checked recently, skipping".to_string(),
+            },
+        );
         return None;
     }
 
-    info!("Running daily character data auto-update check...");
+    ui_log::info(SCOPE, "Checking character database for updates...");
     // Record the check time up-front so a failure (e.g. offline) doesn't
     // cause a retry on every subsequent launch until the interval passes.
     write_last_check_time();
 
     match update_from_github_with_progress(|_msg| {}).await {
         Ok(new_count) => {
+            let total = get_all_character_data().len();
             if new_count > 0 {
-                info!(
-                    "Character data auto-update: {} new skins added",
-                    new_count
+                ui_log::success(
+                    SCOPE,
+                    format!(
+                        "Character database updated: {} new skin(s) ({} total)",
+                        new_count, total
+                    ),
                 );
                 Some(new_count)
             } else {
-                info!("Character data auto-update: already up to date");
+                ui_log::success(
+                    SCOPE,
+                    format!("Character database is up to date ({} skins)", total),
+                );
                 None
             }
         }
         Err(e) => {
-            warn!("Character data auto-update check failed: {}", e);
+            // Not an error for the user: the bundled/cached database still
+            // works, they just will not see skins added since it was written.
+            ui_log::warn(
+                SCOPE,
+                format!("Character database check failed ({}) - using cached data", e),
+            );
             None
         }
     }
+}
+
+/// Whole hours left on the once-per-day throttle, for the skip message.
+fn hours_until_next_check() -> Option<u64> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .ok()?;
+    let last = read_last_check_time()?;
+    let elapsed = now.saturating_sub(last);
+    Some(AUTO_UPDATE_CHECK_INTERVAL_SECS.saturating_sub(elapsed) / 3600)
 }
 
 // ============================================================================

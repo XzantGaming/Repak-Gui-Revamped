@@ -166,16 +166,100 @@
   position: relative;
 }
 
+/* Toolbar: filters on the left, actions pinned right */
+.log-drawer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+
+.log-drawer-chip-group {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.log-drawer-chip {
+  background: transparent;
+  border: 1px solid var(--border-light);
+  color: var(--text-secondary);
+  padding: 2px 9px;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.log-drawer-chip:hover {
+  color: var(--text-primary);
+  border-color: var(--panel-border);
+}
+
+.log-drawer-chip.active {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: #fff;
+}
+
+/* Search */
+.log-drawer-search {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--field-bg);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  padding: 2px 6px;
+  min-width: 120px;
+  flex: 1 1 120px;
+  max-width: 260px;
+}
+
+.log-drawer-search-icon {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.log-drawer-search input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.75rem;
+  width: 100%;
+  padding: 2px 0;
+}
+
+.log-drawer-search-clear {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 0;
+  font-size: 0.8rem;
+}
+
+.log-drawer-search-clear:hover {
+  color: var(--text-primary);
+}
+
 /* Controls Container */
 .log-drawer-controls {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
   display: flex;
   gap: 0.5rem;
-  z-index: 10;
   align-items: center;
-  margin-right: 24px;
+  margin-left: auto;
 }
 
 /* Action Buttons (Clear, Copy) */
@@ -183,22 +267,25 @@
   background: var(--bg-light);
   border: none;
   color: var(--text-secondary);
-  padding: 6px;
+  padding: 5px;
   border-radius: 6px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.1rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  font-size: 1rem;
   transition: all 0.15s ease;
 }
 
-.log-drawer-action-btn:hover {
+.log-drawer-action-btn:hover:not(:disabled) {
   background: var(--bg-lighter);
   color: var(--text-primary);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   transform: scale(1.05);
+}
+
+.log-drawer-action-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* Copy All Feedback Toast */
@@ -327,11 +414,47 @@
   flex-shrink: 0;
 }
 
+.log-drawer-line-time {
+  color: var(--text-secondary);
+  opacity: 0.55;
+  font-size: 0.72rem;
+  flex-shrink: 0;
+  user-select: none;
+  padding-top: 1px;
+}
+
+.log-drawer-line-scope {
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: var(--field-bg);
+  border-radius: 3px;
+  padding: 1px 5px;
+  min-width: 62px;
+  text-align: center;
+  flex-shrink: 0;
+  user-select: none;
+  align-self: flex-start;
+  margin-top: 1px;
+}
+
 .log-drawer-line-content {
   color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-word;
   flex: 1;
+}
+
+/* Note when filters are hiding entries, so an empty-looking drawer is never
+   mistaken for an idle one. */
+.log-drawer-hidden-note {
+  flex-shrink: 0;
+  padding: 4px 8px 0;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  text-align: right;
 }
 
 /* Log line type colors - these remain semantic colors */
@@ -366,4 +489,37 @@
 
 .log-drawer-line.info .log-drawer-line-number {
   color: rgba(33, 150, 243, 0.6);
+}
+
+/* Debug is the step-by-step detail behind an operation - present when you go
+   looking, never competing with the line that actually matters. */
+.log-drawer-line.debug .log-drawer-line-content,
+.log-drawer-line.debug .log-drawer-line-scope {
+  color: var(--text-secondary);
+  opacity: 0.75;
+}
+
+.log-drawer-line.warn .log-drawer-line-content {
+  color: #ff9800;
+}
+
+.log-drawer-line.warn .log-drawer-line-number {
+  color: rgba(255, 152, 0, 0.6);
+}
+
+/* Problems get a left edge so they are findable while scrolling, not just
+   while reading. */
+.log-drawer-line.warn {
+  box-shadow: inset 2px 0 0 rgba(255, 152, 0, 0.7);
+}
+
+.log-drawer-line.error {
+  box-shadow: inset 2px 0 0 rgba(244, 67, 54, 0.8);
+}
+
+/* Unread problem count on the collapsed header. */
+.log-drawer-count.has-problems {
+  color: #ff9800;
+  background: rgba(255, 152, 0, 0.12);
+  font-weight: 600;
 }
