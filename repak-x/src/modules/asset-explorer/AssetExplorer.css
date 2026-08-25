@@ -1,0 +1,1013 @@
+/* Asset Explorer window.
+   Built on the same tokens as the main window (styles/theme.css), so the
+   window follows the user's theme and accent without a palette of its own. */
+
+.ae-window {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+    background: var(--bg-darkest);
+    color: var(--text-primary);
+}
+
+.ae-window-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+}
+
+.ae-root {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+}
+
+/* App.css and theme.css style bare `button`, and Vite bundles every stylesheet
+   into the one sheet this window also loads - so those main-window defaults
+   reach here. Nearly all of them lose to the class rules below, but
+   `min-height: 36px` is a property none of those rules set, so it leaks
+   through and is enough to burst a 21px status bar or a 28px menu row.
+   Reset it per control: a descendant selector like `.ae-window button` would
+   outrank the very component rules it sits above. */
+.ae-icon-btn,
+.ae-view-btn,
+.ae-search-clear,
+.ae-filter-chip,
+.ae-filter-select,
+.ae-clear-filters,
+.ae-status-conflicts,
+.ae-owner,
+.ae-mod-menu-clear,
+.ae-export-menu button,
+.ae-toggle .repakx-checkbox-control,
+.ae-mod-menu-item .repakx-checkbox-control {
+    min-height: 0;
+}
+
+/* ---------------------------------------------------------------- toolbar */
+
+.ae-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 0.85rem;
+    border-bottom: 1px solid var(--panel-border);
+    background: var(--panel-bg);
+}
+
+.ae-search {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+}
+
+.ae-search-icon {
+    position: absolute;
+    left: 0.6rem;
+    color: var(--text-secondary);
+    pointer-events: none;
+    font-size: 0.9rem;
+}
+
+.ae-search input {
+    width: 100%;
+    padding: 0.45rem 2rem 0.45rem 2rem;
+    border-radius: 6px;
+    border: 1px solid var(--input-border);
+    background: var(--input-bg);
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    outline: none;
+    transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.ae-search input:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary), transparent 88%);
+}
+
+.ae-search-clear {
+    position: absolute;
+    right: 0.4rem;
+    display: flex;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0.2rem;
+    border-radius: 4px;
+}
+
+.ae-search-clear:hover {
+    color: var(--text-primary);
+    background: var(--bg-light);
+}
+
+.ae-view-switch {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 7px;
+    background: var(--bg-dark);
+    border: 1px solid var(--panel-border);
+    flex-shrink: 0;
+}
+
+.ae-view-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0.32rem 0.6rem;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.16s ease, color 0.16s ease;
+}
+
+.ae-view-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-light);
+}
+
+.ae-view-btn.active {
+    background: color-mix(in srgb, var(--accent-primary), transparent 82%);
+    color: var(--accent-primary);
+}
+
+/* Below ~880px the labels give way to the icons, the same way the mods
+   header collapses its Check Conflicts label. */
+@media (max-width: 880px) {
+    .ae-view-btn span {
+        display: none;
+    }
+}
+
+.ae-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.ae-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.95rem;
+    transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+
+.ae-icon-btn:hover {
+    background: var(--bg-light);
+    color: var(--text-primary);
+    border-color: var(--panel-border);
+}
+
+.ae-icon-btn.is-busy svg {
+    animation: ae-spin 0.9s linear infinite;
+}
+
+.ae-export-caret {
+    font-size: 0.7rem;
+    opacity: 0.7;
+}
+
+@keyframes ae-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.ae-export {
+    position: relative;
+}
+
+.ae-export-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+}
+
+.ae-export-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 41;
+    min-width: 180px;
+    padding: 4px;
+    border-radius: 8px;
+    border: 1px solid var(--panel-border);
+    background: var(--bg-dark);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    display: flex;
+    flex-direction: column;
+}
+
+.ae-export-menu button {
+    text-align: left;
+    padding: 0.45rem 0.6rem;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 0.82rem;
+    cursor: pointer;
+}
+
+.ae-export-menu button:hover {
+    background: color-mix(in srgb, var(--accent-primary), transparent 88%);
+    color: var(--accent-primary);
+}
+
+/* ---------------------------------------------------------------- filters */
+
+/* One fixed row: the chips scroll sideways rather than wrapping the bar to a
+   second line and pushing the tree down. */
+.ae-filters {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.85rem;
+    border-bottom: 1px solid var(--panel-border);
+    background: var(--bg-darker);
+    flex-wrap: nowrap;
+}
+
+.ae-chip-rail {
+    flex: 1;
+    min-width: 0;
+}
+
+.ae-chip-row {
+    display: flex;
+    gap: 5px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    /* The rail is its own affordance - the fade and the drag say "more this
+       way" without a scrollbar eating a row of an already tight bar. */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    padding: 2px 0;
+}
+
+.ae-chip-row::-webkit-scrollbar {
+    display: none;
+}
+
+/* Faded only on a side that actually has more chips behind it, so a chip set
+   that already fits is never dimmed for nothing. */
+.ae-chip-rail.fade-end .ae-chip-row {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent 100%);
+    mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent 100%);
+}
+
+.ae-chip-rail.fade-start .ae-chip-row {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 36px);
+    mask-image: linear-gradient(to right, transparent 0, #000 36px);
+}
+
+.ae-chip-rail.fade-start.fade-end .ae-chip-row {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 36px, #000 calc(100% - 36px), transparent 100%);
+    mask-image: linear-gradient(to right, transparent 0, #000 36px, #000 calc(100% - 36px), transparent 100%);
+}
+
+.ae-filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+    white-space: nowrap;
+    padding: 0.22rem 0.5rem;
+    border-radius: 999px;
+    border: 1px solid var(--panel-border);
+    background: var(--bg-dark);
+    color: var(--text-secondary);
+    font-size: 0.74rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+
+.ae-filter-chip:hover {
+    color: var(--text-primary);
+    border-color: color-mix(in srgb, var(--accent-primary), transparent 60%);
+}
+
+.ae-filter-chip.active {
+    background: color-mix(in srgb, var(--accent-primary), transparent 85%);
+    border-color: color-mix(in srgb, var(--accent-primary), transparent 55%);
+    color: var(--accent-primary);
+}
+
+.ae-filter-count {
+    opacity: 0.6;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Never squeezed: the rail beside it is what gives way. */
+.ae-filter-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+/* Wrapper around a repakx Checkbox: it only carries the tooltip and the hover
+   state, the control itself brings its own styling. Paired selectors so these
+   win over Checkbox.css regardless of stylesheet order. */
+.ae-toggle {
+    display: inline-flex;
+    align-items: center;
+}
+
+.ae-toggle .repakx-checkbox {
+    gap: 0.4rem;
+}
+
+.ae-toggle .repakx-checkbox-label {
+    font-size: 0.76rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    transition: color 0.16s ease;
+}
+
+.ae-toggle:hover .repakx-checkbox-label {
+    color: var(--text-primary);
+}
+
+.ae-clear-filters {
+    border: none;
+    background: none;
+    color: var(--accent-primary);
+    font-size: 0.76rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0.2rem 0.3rem;
+    border-radius: 4px;
+}
+
+.ae-clear-filters:hover {
+    background: color-mix(in srgb, var(--accent-primary), transparent 88%);
+}
+
+/* mod picker */
+
+.ae-mod-filter {
+    position: relative;
+}
+
+.ae-filter-select {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0.3rem 0.55rem;
+    border-radius: 6px;
+    border: 1px solid var(--panel-border);
+    background: var(--bg-dark);
+    color: var(--text-secondary);
+    font-size: 0.76rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.ae-filter-select:hover {
+    color: var(--text-primary);
+}
+
+.ae-filter-select.active {
+    color: var(--accent-primary);
+    border-color: color-mix(in srgb, var(--accent-primary), transparent 55%);
+}
+
+.ae-select-caret {
+    transition: transform 0.16s ease;
+    font-size: 0.7rem;
+}
+
+.ae-select-caret.is-open {
+    transform: rotate(180deg);
+}
+
+.ae-mod-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 30;
+    width: 260px;
+    border-radius: 8px;
+    border: 1px solid var(--panel-border);
+    background: var(--bg-dark);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+}
+
+.ae-mod-menu-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0.5rem 0.6rem;
+    border-bottom: 1px solid var(--panel-border);
+    color: var(--text-secondary);
+}
+
+.ae-mod-menu-search input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    outline: none;
+}
+
+/* Fixed height, not max-height: the list is windowed, and the row maths in
+   AssetExplorerPanel (MOD_LIST_HEIGHT) assumes this exact viewport. */
+.ae-mod-menu-list {
+    height: 280px;
+    overflow-y: auto;
+    padding: 0 4px;
+}
+
+/* The mod row IS a repakx Checkbox, so its dot and name sit inside the
+   control's label span - that span has to become the flex row. */
+.ae-mod-menu-item.repakx-checkbox {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    /* MOD_ROW_HEIGHT in AssetExplorerPanel.tsx. The windowed list positions
+       rows by index, so this height is load-bearing - change both together. */
+    height: 28px;
+    box-sizing: border-box;
+    gap: 7px;
+    padding: 0 0.4rem;
+    border-radius: 5px;
+    color: var(--text-primary);
+}
+
+.ae-mod-menu-item.repakx-checkbox:hover {
+    background: var(--bg-light);
+}
+
+.ae-mod-menu-item .repakx-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex: 1;
+    min-width: 0;
+    font-size: 0.79rem;
+    font-weight: 500;
+}
+
+.ae-mod-menu-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ae-mod-menu-empty,
+.ae-mod-menu-clear {
+    padding: 0.6rem;
+    text-align: center;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
+.ae-mod-menu-clear {
+    width: 100%;
+    border: none;
+    border-top: 1px solid var(--panel-border);
+    background: transparent;
+    color: var(--accent-primary);
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.ae-mod-menu-clear:hover {
+    background: color-mix(in srgb, var(--accent-primary), transparent 90%);
+}
+
+/* ------------------------------------------------------------------- body */
+
+.ae-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    overflow: hidden;
+}
+
+.ae-tree-pane {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-darkest);
+}
+
+.ae-tree-scroll {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 4px 0;
+}
+
+.ae-tree-empty {
+    padding: 2rem;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+/* ------------------------------------------------------------------- rows */
+
+.ae-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-right: 10px;
+    font-size: 0.79rem;
+    cursor: default;
+    user-select: none;
+    position: relative;
+    box-sizing: border-box;
+}
+
+.ae-row:hover {
+    background: var(--bg-dark);
+}
+
+.ae-row-folder {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.ae-row-folder.is-mod-group {
+    background: color-mix(in srgb, var(--accent-primary), transparent 94%);
+    border-top: 1px solid var(--panel-border);
+}
+
+.ae-row-file {
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.ae-row-file:hover {
+    color: var(--text-primary);
+}
+
+.ae-row-file.is-selected {
+    background: color-mix(in srgb, var(--accent-primary), transparent 85%);
+    color: var(--text-primary);
+}
+
+/* An overlapping asset gets a marker rail rather than a full-row tint: the
+   duplicates sit next to each other, and the rail groups them visually
+   without drowning the surrounding rows. */
+.ae-row-file.is-conflict::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--danger);
+}
+
+.ae-chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    flex-shrink: 0;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.ae-icon {
+    flex-shrink: 0;
+    font-size: 0.9rem;
+}
+
+.ae-icon-folder {
+    color: var(--accent-primary);
+    opacity: 0.85;
+}
+
+.ae-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex-shrink: 1;
+}
+
+.ae-row-file .ae-name {
+    flex: 1;
+}
+
+.ae-row-folder .ae-name {
+    flex: 1;
+}
+
+.ae-meta {
+    flex-shrink: 0;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+    opacity: 0.8;
+}
+
+.ae-meta-dim {
+    opacity: 0.55;
+}
+
+.ae-conflict-count,
+.ae-conflict-flag {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
+    color: var(--danger);
+    font-size: 0.7rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+/* chips */
+
+.ae-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+    padding: 0.08rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    border: 1px solid transparent;
+    max-width: 190px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ae-chip-quiet {
+    background: var(--tag-bg);
+    border-color: var(--tag-border);
+    color: var(--text-secondary);
+}
+
+.ae-chip-mod {
+    background: var(--tag-bg);
+    border-color: var(--tag-border);
+    color: var(--text-primary);
+}
+
+.ae-chip-mod.is-disabled {
+    opacity: 0.5;
+    font-style: italic;
+}
+
+.ae-chip-conflict {
+    background: color-mix(in srgb, var(--danger), transparent 85%);
+    border-color: color-mix(in srgb, var(--danger), transparent 65%);
+    color: var(--danger);
+}
+
+/* The kind chip is redundant with the dot at narrow widths, so it goes first. */
+@media (max-width: 1000px) {
+    .ae-chip-kind {
+        display: none;
+    }
+}
+
+.ae-kind-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 2px;
+    flex-shrink: 0;
+    background: #a1a1aa;
+}
+
+.ae-kind-skeletal-mesh { background: #22d3ee; }
+.ae-kind-static-mesh   { background: #38bdf8; }
+.ae-kind-texture       { background: #facc15; }
+.ae-kind-material      { background: #fb923c; }
+.ae-kind-animation     { background: #c084fc; }
+.ae-kind-blueprint     { background: #a78bfa; }
+.ae-kind-audio         { background: #4ade80; }
+.ae-kind-ui            { background: #f472b6; }
+.ae-kind-movie         { background: #f87171; }
+.ae-kind-text          { background: #fbbf24; }
+.ae-kind-data          { background: #2dd4bf; }
+.ae-kind-level         { background: #818cf8; }
+.ae-kind-other         { background: #a1a1aa; }
+
+.ae-mod-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.ae-mod-dot.is-on {
+    background: var(--success);
+}
+
+.ae-mod-dot.is-off {
+    background: var(--text-secondary);
+    opacity: 0.4;
+}
+
+.ae-copied {
+    position: absolute;
+    right: 12px;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    background: var(--accent-primary);
+    color: var(--btn-text);
+    font-size: 0.68rem;
+    font-weight: 600;
+    pointer-events: none;
+}
+
+/* ----------------------------------------------------------------- detail */
+
+.ae-detail {
+    flex-shrink: 0;
+    overflow: hidden;
+    border-left: 1px solid var(--panel-border);
+    background: var(--panel-bg);
+}
+
+.ae-detail-inner {
+    width: 320px;
+    height: 100%;
+    overflow-y: auto;
+    padding: 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.ae-detail-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.ae-detail-header h3 {
+    margin: 0;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
+}
+
+.ae-detail-section h4 {
+    margin: 0 0 0.35rem;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+}
+
+.ae-detail-name {
+    font-size: 0.95rem;
+    font-weight: 700;
+    word-break: break-all;
+    color: var(--text-primary);
+}
+
+.ae-detail-path {
+    margin-top: 0.2rem;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    word-break: break-all;
+    line-height: 1.4;
+}
+
+.ae-detail-badges {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+    margin-top: 0.5rem;
+}
+
+.ae-detail-hint {
+    margin: 0 0 0.45rem;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    opacity: 0.75;
+}
+
+.ae-owner-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.ae-owner {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    padding: 0.4rem 0.5rem;
+    border-radius: 6px;
+    border: 1px solid var(--panel-border);
+    background: var(--bg-dark);
+    color: var(--text-primary);
+    font-size: 0.78rem;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.ae-owner:hover {
+    border-color: color-mix(in srgb, var(--accent-primary), transparent 55%);
+    background: color-mix(in srgb, var(--accent-primary), transparent 90%);
+}
+
+.ae-owner.is-source {
+    border-color: color-mix(in srgb, var(--accent-primary), transparent 60%);
+}
+
+.ae-owner-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ae-owner-meta {
+    flex-shrink: 0;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.ae-detail-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.78rem;
+}
+
+.ae-detail-rows > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.ae-detail-rows span:first-child {
+    color: var(--text-secondary);
+}
+
+.ae-detail-rows span:last-child {
+    color: var(--text-primary);
+    text-align: right;
+    word-break: break-word;
+}
+
+/* ----------------------------------------------------------------- status */
+
+.ae-status {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    /* Height is pinned to hug the text rather than pad around it: the bar was
+       never about the type size, it was the slack the wrapper added on top of
+       it. Pinning also stops any child - the conflict button, its warning
+       glyph - from setting the bar's height. */
+    height: 21px;
+    padding: 0 0.85rem;
+    line-height: 1;
+    white-space: nowrap;
+    border-top: 1px solid var(--panel-border);
+    background: var(--status-bar-bg);
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.ae-status strong {
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.ae-status-dim {
+    opacity: 0.6;
+}
+
+.ae-status-sep {
+    width: 1px;
+    height: 11px;
+    flex-shrink: 0;
+    background: var(--panel-border);
+}
+
+.ae-status-spacer {
+    flex: 1;
+}
+
+.ae-status-conflicts {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: none;
+    background: none;
+    color: var(--danger);
+    font-size: 0.72rem;
+    /* No vertical padding: the bar is height-pinned, so any would only crop. */
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 0.3rem;
+    height: 17px;
+    border-radius: 4px;
+}
+
+.ae-status-conflicts strong {
+    color: var(--danger);
+}
+
+.ae-status-conflicts:hover {
+    background: color-mix(in srgb, var(--danger), transparent 88%);
+}
+
+.ae-status-failed {
+    color: var(--danger);
+    opacity: 0.85;
+    cursor: help;
+}
+
+/* ------------------------------------------------------------ empty / busy */
+
+.ae-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    color: var(--text-secondary);
+    font-size: 0.88rem;
+    padding: 2rem;
+    text-align: center;
+}
+
+.ae-state h3 {
+    margin: 0;
+    color: var(--text-primary);
+}
+
+.ae-state-detail {
+    max-width: 460px;
+    font-size: 0.78rem;
+    word-break: break-word;
+}
+
+.ae-spinner {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 2px solid var(--panel-border);
+    border-top-color: var(--accent-primary);
+    animation: ae-spin 0.8s linear infinite;
+}
+
+.ae-toast {
+    position: fixed;
+    bottom: 2.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0.5rem 0.9rem;
+    border-radius: 8px;
+    background: var(--bg-light);
+    border: 1px solid var(--panel-border);
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    font-weight: 600;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    z-index: 60;
+}

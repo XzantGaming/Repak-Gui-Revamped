@@ -29,6 +29,7 @@ import { RiDeleteBin2Fill } from 'react-icons/ri'
 import { MdDriveFileMoveOutline } from "react-icons/md"
 import { FaTag, FaToolbox, FaSort } from "react-icons/fa6"
 import { IoMdWifi, IoIosSettings, IoMdWarning } from "react-icons/io"
+import { VscListTree } from "react-icons/vsc"
 import { GrInstall } from "react-icons/gr"
 import { GiLightningTrio } from "react-icons/gi"
 import Checkbox from './components/ui/Checkbox'
@@ -479,6 +480,35 @@ function App() {
     }
   }
 
+  const openAssetExplorerWindow = async () => {
+    try {
+      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
+      const existing = await WebviewWindow.getByLabel('asset-explorer')
+      if (existing) {
+        await existing.setFocus()
+        return
+      }
+
+      const explorerWindow = new WebviewWindow('asset-explorer', {
+        url: '/asset-explorer',
+        title: 'Repak X - Asset Explorer',
+        width: 1320,
+        height: 820,
+        minWidth: 900,
+        minHeight: 560,
+        center: true,
+        resizable: true,
+        decorations: false,
+      })
+
+      explorerWindow.once('tauri://error', (e) => {
+        console.error('[AssetExplorer] Failed to create window:', e)
+      })
+    } catch (e) {
+      console.error('[AssetExplorer] Window error:', e)
+    }
+  }
+
   const handleSendToVfxUpdater = async (mod: ModRecord | null) => {
     if (!mod) return
 
@@ -874,6 +904,46 @@ function App() {
       setIsRightPanelOpen(true)
     }
   }
+
+  // Double-clicking an asset in the Asset Explorer window selects the mod it
+  // came from here. Active filters are cleared first: landing on a selection
+  // the list is currently filtering out would look like nothing happened.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null
+    let cancelled = false
+
+    listen('asset-explorer:reveal-mod', (event: any) => {
+      const modPath = event?.payload?.modPath
+      if (typeof modPath !== 'string') return
+
+      const target = mods.find(m => m.path === modPath)
+      if (!target) {
+        uiLog.warn('Asset Explorer', 'That mod is no longer in the mods list')
+        return
+      }
+
+      setSelectedFolderId('all')
+      setLocalSearch('')
+      setSearchQuery('')
+      setSelectedCharacters(new Set())
+      setSelectedCategories(new Set())
+      setFilterTag('')
+      setSelectedMod(target)
+      if (!isRightPanelOpen) {
+        setLeftPanelWidth(lastPanelWidth > 60 ? lastPanelWidth : 70)
+        setIsRightPanelOpen(true)
+      }
+      setStatus(`Selected ${target.path.split(/[/\\]/).pop()}`)
+    }).then(fn => {
+      if (cancelled) fn()
+      else unlisten = fn
+    })
+
+    return () => {
+      cancelled = true
+      if (unlisten) unlisten()
+    }
+  }, [mods, isRightPanelOpen, lastPanelWidth])
 
   const handleContextMenu = (e: React.MouseEvent, mod: ModRecord) => {
     e.preventDefault()
@@ -2887,6 +2957,22 @@ function App() {
     filteredMods, isRightPanelOpen, lastPanelWidth
   ])
 
+  // Keep the selected mod on screen. `block: 'nearest'` makes this a no-op when
+  // the card is already visible, so clicking a mod never yanks the list - it
+  // only moves for selections the user did not make by clicking: arrow-key
+  // navigation, and reveals from the Asset Explorer window. Depends on
+  // filteredMods because a reveal clears the filters first, and the card only
+  // exists once that re-render has landed.
+  useEffect(() => {
+    if (!selectedMod) return
+    const grid = modsGridRef.current
+    if (!grid) return
+
+    const escaped = selectedMod.path.replace(/["\\]/g, '\\$&')
+    const card = grid.querySelector<HTMLElement>(`[data-mod-path="${escaped}"]`)
+    card?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [selectedMod, filteredMods])
+
   // Group mods by folder
   const modsByFolder: Record<string, ModRecord[]> = {}
   modsByFolder['_root'] = filteredMods.filter(m => !m.folder_id)
@@ -3297,6 +3383,7 @@ function App() {
       {panels.tools && (
         <ToolsPanel
           onClose={() => setPanel('tools', false)}
+          onOpenAssetExplorer={openAssetExplorerWindow}
         />
       )}
 
@@ -3801,6 +3888,16 @@ function App() {
                   </h2>
                 </div>
                 <div className="header-actions" data-tour="header-actions">
+                  <button
+                    onClick={openAssetExplorerWindow}
+                    className="btn-ghost btn-asset-explorer"
+                    data-tour="asset-explorer-btn"
+                    title="Browse every asset in every installed mod"
+                  >
+                    <VscListTree style={{ color: 'var(--accent-primary)', width: '18px', height: '18px' }} />
+                    <span className="btn-label">Asset Explorer</span>
+                  </button>
+                  <div className="divider-vertical" />
                   <button onClick={handleCheckClashes} className="btn-ghost btn-check-conflicts" title="Check for conflicts">
                     <IoMdWarning className="warning-icon" style={{ color: 'var(--accent-primary)', width: '18px', height: '18px' }} />
                     <span className="btn-label">Check Conflicts</span>

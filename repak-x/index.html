@@ -167,8 +167,14 @@
   </div>
   <div id="root"></div>
   <script>
-    // Hide splash immediately for secondary windows (VFX updater, etc.)
-    if (window.location.href.includes('vfx-updater')) {
+    // Hide the splash immediately for secondary windows. Only App.tsx clears
+    // it, and secondary windows never render App - so a route missing from this
+    // list keeps a full-screen overlay parked on top of a window that did load.
+    // Keep in sync with the route checks in src/main.tsx.
+    var SECONDARY_WINDOW_ROUTES = ['vfx-updater', 'asset-explorer'];
+    if (SECONDARY_WINDOW_ROUTES.some(function (route) {
+      return window.location.href.includes(route);
+    })) {
       document.getElementById('splash-screen').style.display = 'none';
     }
   </script>

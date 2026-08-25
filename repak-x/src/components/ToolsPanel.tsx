@@ -8,6 +8,7 @@ import { RiFileZipFill } from "react-icons/ri";
 import { FaUsers } from "react-icons/fa";
 import { FaToolbox } from "react-icons/fa6";
 import { MdRemoveModerator } from "react-icons/md";
+import { VscListTree } from "react-icons/vsc";
 import { IconType } from 'react-icons';
 import Progress from './ui/Progress';
 import { uiLog } from '../utils/uiLog';
@@ -21,6 +22,8 @@ type RecompressProgress = {
 
 type ToolsPanelProps = {
     onClose: () => void;
+    /** Opens the Asset Explorer window; the panel closes itself first. */
+    onOpenAssetExplorer?: () => void;
 };
 
 type StatusTone = 'on' | 'off' | 'unknown' | 'error';
@@ -40,7 +43,7 @@ type ToolCardConfig = {
     progress?: RecompressProgress;
 };
 
-export default function ToolsPanel({ onClose }: ToolsPanelProps) {
+export default function ToolsPanel({ onClose, onOpenAssetExplorer }: ToolsPanelProps) {
     const [isUpdatingChars, setIsUpdatingChars] = useState(false);
     const [charUpdateStatus, setCharUpdateStatus] = useState('');
     const [isSkippingLauncher, setIsSkippingLauncher] = useState(false);
@@ -215,6 +218,14 @@ export default function ToolsPanel({ onClose }: ToolsPanelProps) {
     };
 
     const tools: ToolCardConfig[] = [
+        ...(onOpenAssetExplorer ? [{
+            id: 'asset-explorer',
+            icon: VscListTree,
+            title: 'Asset Explorer',
+            description: 'Browse every asset across all installed mods.',
+            onClick: () => { onClose(); onOpenAssetExplorer(); },
+            busy: false,
+        } as ToolCardConfig] : []),
         {
             id: 'sig-bypasser',
             icon: MdRemoveModerator,

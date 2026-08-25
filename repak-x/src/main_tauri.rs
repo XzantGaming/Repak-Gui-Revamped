@@ -3,6 +3,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod asset_explorer;
 mod character_data;
 mod crash_monitor;
 mod discord_presence;
@@ -7033,7 +7034,19 @@ async fn get_mod_details(
     _detect_blueprint: Option<bool>,
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<ModDetails, String> {
-    let path = PathBuf::from(&mod_path);
+    compute_mod_details(&PathBuf::from(&mod_path), &state)
+}
+
+/// The body of [`get_mod_details`], callable from other commands.
+///
+/// Split out so the Asset Explorer can build its index over every installed
+/// mod through the same mtime-keyed cache instead of issuing one IPC round-trip
+/// per mod and re-opening PAKs the main window has already read.
+fn compute_mod_details(
+    path: &PathBuf,
+    state: &Arc<Mutex<AppState>>,
+) -> Result<ModDetails, String> {
+    let path = path.clone();
 
     info!("Getting details for mod: {}", path.display());
 
@@ -7221,6 +7234,163 @@ async fn get_mod_details(
     // --- End cache store ---
 
     Ok(details)
+}
+
+/// Build the merged asset index the Asset Explorer window renders.
+///
+/// One IPC round-trip for every mod at once. The per-mod work goes through
+/// [`compute_mod_details`], so anything the main window has already looked at
+/// is served from the mtime-keyed cache and only genuinely new or changed mods
+/// pay for a PAK open.
+#[tauri::command]
+async fn get_asset_explorer_index(
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<asset_explorer::AssetExplorerIndex, String> {
+    use asset_explorer::{
+        classify_asset, clean_mod_display_name, is_metadata_path, mod_priority,
+        normalize_asset_path, AssetExplorerFailure, AssetExplorerMod,
+    };
+
+    let started = std::time::Instant::now();
+
+    // Snapshot what we need and drop the guard: compute_mod_details takes the
+    // same lock per mod, so holding it across the whole scan would deadlock.
+    let (game_path, root_folder_name) = {
+        let guard = state.lock().unwrap();
+        let game_path = guard.game_path.clone();
+        let root_folder_name = game_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("~mods")
+            .to_string();
+        (game_path, root_folder_name)
+    };
+
+    if !game_path.exists() {
+        ui_log::error(
+            "Asset Explorer",
+            "Mods folder does not exist - cannot build asset index",
+        );
+        return Err(format!("Game path does not exist: {}", game_path.display()));
+    }
+
+    ui_log::info("Asset Explorer", "Building asset index for all mods...");
+
+    let inner = (*state).clone();
+    let mut mods: Vec<AssetExplorerMod> = Vec::new();
+    let mut failed: Vec<AssetExplorerFailure> = Vec::new();
+    let mut total_assets = 0usize;
+
+    for entry in WalkDir::new(&game_path).into_iter().filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if path.is_dir() {
+            continue;
+        }
+
+        // Same set the mods list shows: enabled, disabled and backed-up bundles.
+        let ext = path.extension().and_then(|s| s.to_str());
+        if ext != Some("pak") && ext != Some("pak_disabled") && ext != Some("bak_repak") {
+            continue;
+        }
+
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let display_name = clean_mod_display_name(&file_name);
+
+        let details = match compute_mod_details(&path.to_path_buf(), &inner) {
+            Ok(d) => d,
+            Err(e) => {
+                ui_log::warn(
+                    "Asset Explorer",
+                    format!("Skipped unreadable mod {}: {}", file_name, e),
+                );
+                failed.push(AssetExplorerFailure {
+                    path: path.to_string_lossy().to_string(),
+                    display_name,
+                    error: e,
+                });
+                continue;
+            }
+        };
+
+        // Folder id matches get_pak_files so the explorer's folder filter and
+        // the main window's folder tree label the same mod the same way.
+        let folder_id = path.parent().and_then(|parent| {
+            if parent == game_path {
+                Some(root_folder_name.clone())
+            } else {
+                parent
+                    .strip_prefix(&game_path)
+                    .map(|p| p.to_string_lossy().replace('\\', "/"))
+                    .ok()
+            }
+        });
+
+        // Normalize once, here, so both listing sources land in the same tree
+        // and identical assets from different mods actually collide.
+        let mut files: Vec<String> = Vec::with_capacity(details.files.len());
+        let mut kinds: Vec<&'static str> = Vec::with_capacity(details.files.len());
+        let mut seen = std::collections::HashSet::new();
+        for raw in &details.files {
+            if is_metadata_path(raw) {
+                continue;
+            }
+            let normalized = normalize_asset_path(raw);
+            if normalized.is_empty() {
+                continue;
+            }
+            // A hybrid mod lists the same asset from its .utoc and its .pak;
+            // that is one asset, not a conflict with itself.
+            if !seen.insert(normalized.clone()) {
+                continue;
+            }
+            kinds.push(classify_asset(&normalized).id());
+            files.push(normalized);
+        }
+
+        total_assets += files.len();
+
+        mods.push(AssetExplorerMod {
+            path: path.to_string_lossy().to_string(),
+            display_name,
+            enabled: ext == Some("pak"),
+            priority: mod_priority(path.file_stem().and_then(|s| s.to_str()).unwrap_or("")),
+            folder_id,
+            category: details.category,
+            character_name: details.character_name,
+            character_id: details.character_id,
+            is_iostore: details.is_iostore,
+            total_size: details.total_size,
+            files,
+            kinds,
+        });
+    }
+
+    mods.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
+
+    ui_log::info(
+        "Asset Explorer",
+        format!(
+            "Indexed {} asset(s) across {} mod(s){} ({}ms)",
+            total_assets,
+            mods.len(),
+            if failed.is_empty() {
+                String::new()
+            } else {
+                format!(", {} unreadable", failed.len())
+            },
+            started.elapsed().as_millis()
+        ),
+    );
+
+    Ok(asset_explorer::AssetExplorerIndex {
+        mods,
+        failed,
+        total_assets,
+    })
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -8272,6 +8442,7 @@ fn main() {
             get_mod_details,
             set_mod_priority,
             check_mod_clashes,
+            get_asset_explorer_index,
             check_single_mod_conflicts,
             extract_pak_to_destination,
             extract_mod_assets,

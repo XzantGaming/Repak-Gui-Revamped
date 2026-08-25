@@ -3,7 +3,8 @@
   "description": "Capability for the main application window",
   "windows": [
     "main",
-    "vfx-updater"
+    "vfx-updater",
+    "asset-explorer"
   ],
   "permissions": [
     "core:default",

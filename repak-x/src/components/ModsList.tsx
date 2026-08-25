@@ -265,6 +265,9 @@ const ModItem = memo(function ModItem({
     return (
         <div
             className={`mod-card ${isChecked ? 'selected' : ''} ${isViewing ? 'viewing' : ''} ${heroImage && showHeroBg ? 'has-hero-bg' : ''}`}
+            // Lets the app scroll a specific mod into view without threading a
+            // ref per card (see the reveal effect in App.tsx).
+            data-mod-path={mod.path}
             onContextMenu={(e) => onContextMenu(e, mod)}
         >
             {/* Blurred hero background for all views */}

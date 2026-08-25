@@ -1807,6 +1807,13 @@ input[type="text"]:focus {
 .center-header .header-actions {
   flex: 0 0 auto;
   white-space: nowrap;
+  gap: 0.35rem;
+}
+
+/* The divider brought its own margins; trim them so the new gap adds up to
+   the same 0.5rem it used to sit in. */
+.center-header .header-actions .divider-vertical {
+  margin: 0 0.15rem;
 }
 
 /* Labels that collapse at narrow widths animate their width down to zero
@@ -1815,6 +1822,7 @@ input[type="text"]:focus {
    kept close to the label's real width so the motion starts immediately. */
 .mod-count-word,
 .btn-check-conflicts .btn-label,
+.btn-asset-explorer .btn-label,
 .bulk-count-label {
   overflow: hidden;
   white-space: nowrap;
@@ -1825,18 +1833,39 @@ input[type="text"]:focus {
   max-width: 7rem;
 }
 
+.btn-asset-explorer .btn-label {
+  max-width: 8rem;
+}
+
 .mod-count-word,
 .bulk-count-label {
   max-width: 4rem;
 }
 
 /* The button's own gap and padding shrink alongside its label */
-.btn-check-conflicts {
+.btn-check-conflicts,
+.btn-asset-explorer {
   transition: gap 0.22s ease, padding 0.22s ease, border-color 0.2s ease, background 0.2s ease;
 }
 
+/* Two labelled actions fit the header far less comfortably than one, so the
+   Asset Explorer label — the longer of the two, and the one whose icon reads
+   most clearly on its own — collapses first, a step before the rest. */
+@container modheader (max-width: 860px) {
+  .btn-asset-explorer .btn-label {
+    max-width: 0;
+    opacity: 0;
+  }
+
+  .btn-asset-explorer {
+    gap: 0;
+    padding-left: 0.55rem;
+    padding-right: 0.55rem;
+  }
+}
+
 /* Below ~720px the action buttons would squeeze the title to nothing, so drop
-   the two labels that the icons and the numbers already convey. */
+   the remaining labels that the icons and the numbers already convey. */
 @container modheader (max-width: 720px) {
   .btn-check-conflicts .btn-label {
     max-width: 0;
