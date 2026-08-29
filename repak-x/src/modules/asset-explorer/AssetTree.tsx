@@ -158,12 +158,16 @@ export default function AssetTree({
                         transform: `translateY(${start * ROW_HEIGHT}px)`,
                     }}
                 >
-                    {visible.map(({ key, depth, node }) => (
+                    {/* Striping keys off the absolute row index: the mounted
+                        slice starts at a different parity as you scroll, so
+                        :nth-child() would make the bands jump. */}
+                    {visible.map(({ key, depth, node }, i) => (
                         node.type === 'folder' ? (
                             <FolderRow
                                 key={key}
                                 node={node}
                                 depth={depth}
+                                alt={(start + i) % 2 === 1}
                                 isOpen={expanded.has(node.id)}
                                 mod={node.modIndex !== undefined ? mods[node.modIndex] : undefined}
                                 copiedLabel={copied?.id === key ? copied.label : null}
@@ -176,6 +180,7 @@ export default function AssetTree({
                                 key={key}
                                 node={node}
                                 depth={depth}
+                                alt={(start + i) % 2 === 1}
                                 mod={mods[node.row.modIndex]}
                                 showFullPath={isFlat}
                                 selected={selectedPath === node.id}
@@ -195,6 +200,8 @@ export default function AssetTree({
 type FolderRowProps = {
     node: FolderNode
     depth: number
+    /** Odd absolute row index — the zebra band. */
+    alt: boolean
     isOpen: boolean
     mod?: ExplorerMod
     copiedLabel: string | null
@@ -204,13 +211,13 @@ type FolderRowProps = {
 }
 
 const FolderRow = React.memo(function FolderRow({
-    node, depth, isOpen, mod, copiedLabel, onToggle, onCopy, onReveal,
+    node, depth, alt, isOpen, mod, copiedLabel, onToggle, onCopy, onReveal,
 }: FolderRowProps) {
     const isModGroup = node.modIndex !== undefined
 
     return (
         <div
-            className={`ae-row ae-row-folder ${isModGroup ? 'is-mod-group' : ''}`}
+            className={`ae-row ae-row-folder ${alt ? 'is-alt' : ''} ${isModGroup ? 'is-mod-group' : ''}`}
             style={{ paddingLeft: 6 + depth * 14, height: ROW_HEIGHT }}
             onClick={() => onToggle(node.id)}
             onDoubleClick={isModGroup && mod
@@ -252,6 +259,8 @@ const FolderRow = React.memo(function FolderRow({
 type FileRowProps = {
     node: FileNode
     depth: number
+    /** Odd absolute row index — the zebra band. */
+    alt: boolean
     mod: ExplorerMod
     showFullPath: boolean
     selected: boolean
@@ -262,14 +271,14 @@ type FileRowProps = {
 }
 
 const FileRow = React.memo(function FileRow({
-    node, depth, mod, showFullPath, selected, copiedLabel, onSelect, onCopy, onReveal,
+    node, depth, alt, mod, showFullPath, selected, copiedLabel, onSelect, onCopy, onReveal,
 }: FileRowProps) {
     const { row, conflict } = node
     const label = showFullPath ? row.path.replace(/^Game\//, '') : row.name
 
     return (
         <div
-            className={`ae-row ae-row-file ${conflict ? 'is-conflict' : ''} ${selected ? 'is-selected' : ''}`}
+            className={`ae-row ae-row-file ${alt ? 'is-alt' : ''} ${conflict ? 'is-conflict' : ''} ${selected ? 'is-selected' : ''}`}
             style={{ paddingLeft: 6 + depth * 14, height: ROW_HEIGHT }}
             onClick={() => onSelect(node)}
             onDoubleClick={(e) => { e.stopPropagation(); onReveal(mod.path) }}

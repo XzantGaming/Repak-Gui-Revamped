@@ -37,6 +37,7 @@ type ContextMenuProps = {
   onCheckConflicts?: () => void
   onUpdateMod?: () => void
   onSendToVfxUpdater?: (mod: ModRecord) => void
+  onShowInAssetExplorer?: (mod: ModRecord) => void
   onExtractAssets?: (mod: ModRecord) => void
   allTags: string[]
   onDeleteTag?: (tag: string) => void
@@ -46,7 +47,7 @@ type ContextMenuProps = {
   selectionCount?: number
 }
 
-const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onNewTag, onMoveTo, onMoveFolderTo, onCreateFolder, folders, onDelete, onToggle, onRename, onRenameFolder, onCheckConflicts, onUpdateMod, onSendToVfxUpdater, onExtractAssets, allTags, onDeleteTag, gamePath, holdToDelete = true, selectionCount = 0 }: ContextMenuProps) => {
+const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onNewTag, onMoveTo, onMoveFolderTo, onCreateFolder, folders, onDelete, onToggle, onRename, onRenameFolder, onCheckConflicts, onUpdateMod, onSendToVfxUpdater, onShowInAssetExplorer, onExtractAssets, allTags, onDeleteTag, gamePath, holdToDelete = true, selectionCount = 0 }: ContextMenuProps) => {
   const [isDeleting, setIsDeleting] = useState(false)
   const deleteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
@@ -391,6 +392,11 @@ const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onNewTag, onMove
 
       <div className="context-menu-separator" />
 
+      {onShowInAssetExplorer && (
+        <div className="context-menu-item" onClick={() => { onShowInAssetExplorer(mod); onClose(); }}>
+          {selectionCount > 1 ? `Show ${selectionCount} mods in Asset Explorer` : 'Show in Asset Explorer'}
+        </div>
+      )}
       <div className="context-menu-item" onClick={() => {
         if (onExtractAssets) onExtractAssets(mod);
         onClose();

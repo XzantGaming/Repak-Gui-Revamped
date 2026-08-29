@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useDebounce } from 'use-debounce'
-import { emitTo } from '@tauri-apps/api/event'
+import { emitTo, listen } from '@tauri-apps/api/event'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
@@ -37,6 +37,23 @@ import './AssetExplorer.css'
 /** Below this many filtered rows a search opens every folder holding a hit. */
 const AUTO_EXPAND_LIMIT = 2000
 
+/** Set by the main window's "Show in Asset Explorer" before it opens this one. */
+const FOCUS_MOD_KEY = 'repakx:assetExplorer:focusModPath'
+
+/** Keeps the requested order, drops anything that is not a usable path. */
+function toModPaths(value: unknown): string[] {
+    if (!Array.isArray(value)) return []
+    return Array.from(new Set(value.filter((v): v is string => typeof v === 'string' && v.length > 0)))
+}
+
+function parseModPaths(stored: string): string[] {
+    try {
+        return toModPaths(JSON.parse(stored))
+    } catch {
+        return []
+    }
+}
+
 /** Mod picker windowing. Must match .ae-mod-menu-item / .ae-mod-menu-list CSS. */
 const MOD_ROW_HEIGHT = 28
 const MOD_LIST_HEIGHT = 280
@@ -62,6 +79,7 @@ export default function AssetExplorerPanel() {
     const [selected, setSelected] = useState<FileNode | null>(null)
     const [exportOpen, setExportOpen] = useState(false)
     const [toast, setToast] = useState<string | null>(null)
+    const [pendingFocusMods, setPendingFocusMods] = useState<string[] | null>(null)
 
     const filters: Filters = useMemo(() => ({
         query,
@@ -106,6 +124,62 @@ export default function AssetExplorerPanel() {
         setToast(message)
         setTimeout(() => setToast(null), 1800)
     }, [])
+
+    // "Show in Asset Explorer" in the main window, from either a cold start
+    // (prefill key) or a window that was already open (event).
+    useEffect(() => {
+        const stored = localStorage.getItem(FOCUS_MOD_KEY)
+        if (stored) {
+            localStorage.removeItem(FOCUS_MOD_KEY)
+            const paths = parseModPaths(stored)
+            if (paths.length > 0) setPendingFocusMods(paths)
+        }
+
+        let unlisten: (() => void) | null = null
+        let cancelled = false
+
+        listen('main:show-mod-assets', (event: any) => {
+            const paths = toModPaths(event?.payload?.modPaths)
+            if (paths.length > 0) setPendingFocusMods(paths)
+        }).then(fn => {
+            if (cancelled) fn()
+            else unlisten = fn
+        })
+
+        return () => {
+            cancelled = true
+            if (unlisten) unlisten()
+        }
+    }, [])
+
+    // Held until the index is in, so the request can be matched to real mods and
+    // a disabled one can turn its own filter on rather than showing nothing.
+    useEffect(() => {
+        if (!pendingFocusMods || !index) return
+        setPendingFocusMods(null)
+
+        const wanted = new Set(pendingFocusMods)
+        const matched = index.mods.filter(m => wanted.has(m.path))
+        if (matched.length === 0) {
+            showToast(pendingFocusMods.length === 1
+                ? 'That mod is not in the asset index'
+                : 'Those mods are not in the asset index')
+            return
+        }
+
+        setRawQuery('')
+        setKinds(new Set())
+        setConflictsOnly(false)
+        if (matched.some(m => !m.enabled)) setShowDisabled(true)
+        setModFilter(new Set(matched.map(m => m.path)))
+        setSelected(null)
+        // Mods missing from the index are called out, so a short result is not a mystery.
+        const missing = pendingFocusMods.length - matched.length
+        const note = missing > 0 ? ` (${missing} not indexed)` : ''
+        showToast(matched.length === 1
+            ? `Showing ${matched[0].display_name}${note}`
+            : `Showing ${matched.length} mods${note}`)
+    }, [pendingFocusMods, index, showToast])
 
     const handleToggleFolder = useCallback((id: string) => {
         setExpanded(prev => {

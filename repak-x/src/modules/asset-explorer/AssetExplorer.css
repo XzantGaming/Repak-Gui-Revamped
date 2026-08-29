@@ -549,6 +549,11 @@
     box-sizing: border-box;
 }
 
+/* Zebra banding. Declared before hover/selected/mod-group so those still win. */
+.ae-row.is-alt {
+    background: color-mix(in srgb, var(--text-primary), transparent 96%);
+}
+
 .ae-row:hover {
     background: var(--bg-dark);
 }
@@ -896,11 +901,8 @@
     display: flex;
     align-items: center;
     gap: 0.55rem;
-    /* Height is pinned to hug the text rather than pad around it: the bar was
-       never about the type size, it was the slack the wrapper added on top of
-       it. Pinning also stops any child - the conflict button, its warning
-       glyph - from setting the bar's height. */
-    height: 21px;
+    /* Pinned so no child - the conflict button, its warning glyph - sets the bar's height. */
+    height: 28px;
     padding: 0 0.85rem;
     line-height: 1;
     white-space: nowrap;
@@ -922,7 +924,7 @@
 
 .ae-status-sep {
     width: 1px;
-    height: 11px;
+    height: 14px;
     flex-shrink: 0;
     background: var(--panel-border);
 }
@@ -942,8 +944,8 @@
     /* No vertical padding: the bar is height-pinned, so any would only crop. */
     line-height: 1;
     cursor: pointer;
-    padding: 0 0.3rem;
-    height: 17px;
+    padding: 0 0.35rem;
+    height: 20px;
     border-radius: 4px;
 }
 

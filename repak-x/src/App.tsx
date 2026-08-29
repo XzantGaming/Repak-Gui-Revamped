@@ -102,6 +102,7 @@ const AURORA_PALETTES: Record<string, string[]> = {
 };
 
 const VFX_UPDATER_MOD_PREFILL_KEY = 'repakx:vfxUpdater:modPath'
+const ASSET_EXPLORER_FOCUS_MOD_KEY = 'repakx:assetExplorer:focusModPath'
 
 import TitleBar from './components/TitleBar'
 
@@ -507,6 +508,28 @@ function App() {
     } catch (e) {
       console.error('[AssetExplorer] Window error:', e)
     }
+  }
+
+  // Opens the explorer filtered to the given mods. A window that is already up
+  // gets an event; a cold start reads the prefill key, since it cannot listen yet.
+  const handleShowInAssetExplorer = async (modPaths: string[]) => {
+    if (modPaths.length === 0) return
+
+    try {
+      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
+      const existing = await WebviewWindow.getByLabel('asset-explorer')
+      if (existing) {
+        const { emitTo } = await import('@tauri-apps/api/event')
+        await emitTo('asset-explorer', 'main:show-mod-assets', { modPaths })
+        await existing.setFocus()
+        return
+      }
+    } catch (e) {
+      console.error('[AssetExplorer] Failed to focus mods:', e)
+    }
+
+    localStorage.setItem(ASSET_EXPLORER_FOCUS_MOD_KEY, JSON.stringify(modPaths))
+    await openAssetExplorerWindow()
   }
 
   const handleSendToVfxUpdater = async (mod: ModRecord | null) => {
@@ -4209,6 +4232,15 @@ function App() {
             onCheckConflicts={() => contextMenu.mod && handleCheckSingleModClashes(contextMenu.mod)}
             onUpdateMod={() => contextMenu.mod && handleInitiateUpdate(contextMenu.mod)}
             onSendToVfxUpdater={() => contextMenu.mod && handleSendToVfxUpdater(contextMenu.mod)}
+            onShowInAssetExplorer={() => {
+              if (!contextMenu.mod) return
+              // Same selection rule as onMoveTo: acting on a mod inside the
+              // current selection acts on the whole selection.
+              const targets = selectedMods.has(contextMenu.mod.path)
+                ? Array.from(selectedMods)
+                : [contextMenu.mod.path]
+              handleShowInAssetExplorer(targets)
+            }}
             onExtractAssets={handleExtractAssets}
             allTags={allTags}
             onDeleteTag={handleDeleteTagFromCatalog}
