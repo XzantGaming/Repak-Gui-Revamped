@@ -133,6 +133,17 @@ export function usePipeline({
         throw new Error("No assets found in mod");
       }
 
+      // Step 8 packs only these, so a stray dependency can never reach the bundle.
+      const modExtractNorm = tempDirs.modExtract.replace(/\\/g, "/");
+      const toRelative = (p: string) => {
+        let norm = p.replace(/\\/g, "/");
+        if (norm.startsWith(modExtractNorm)) {
+          norm = norm.substring(modExtractNorm.length).replace(/^\//, "");
+        }
+        return norm;
+      };
+      const modAssetManifest = modAssets.map(toRelative);
+
       // ===== STEP 1.5: Scan Asset Classes =====
       checkCancel();
       addLog("Scanning asset classes...", "info");
@@ -209,6 +220,7 @@ export function usePipeline({
           usmapPath,
           inputDir: tempDirs.finalUassets,
           outputBase,
+          allowedAssets: modAssetManifest,
         });
         checkCancel();
 
@@ -302,17 +314,7 @@ export function usePipeline({
       setStepStatus({ message: "Extracting vanilla assets from game..." });
 
       // Extract relative game paths from full paths for vanilla filter
-      const filterPatterns = updatableAssets.map((p) => {
-        let norm = p.replace(/\\/g, "/");
-        // Remove temp dir prefix to get relative game path
-        const modExtractNorm = tempDirs.modExtract.replace(/\\/g, "/");
-        if (norm.startsWith(modExtractNorm)) {
-          norm = norm.substring(modExtractNorm.length);
-          if (norm.startsWith("/")) norm = norm.substring(1);
-        }
-        if (norm.endsWith(".uasset")) norm = norm.slice(0, -7);
-        return norm;
-      });
+      const filterPatterns = updatableAssets.map((p) => toRelative(p).replace(/\.uasset$/, ""));
       console.debug("[VFX] Filter patterns (first 3):", filterPatterns.slice(0, 3));
 
       const vanillaAssets = await invoke<string[]>("vfx_extract_vanilla_assets", {
@@ -446,6 +448,7 @@ export function usePipeline({
         usmapPath,
         inputDir: tempDirs.finalUassets,
         outputBase,
+        allowedAssets: modAssetManifest,
       });
       checkCancel();
 

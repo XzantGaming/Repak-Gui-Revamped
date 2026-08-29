@@ -127,11 +127,20 @@ pub async fn vfx_pack_to_iostore(
     usmap_path: String,
     input_dir: String,
     output_base: String,
+    allowed_assets: Option<Vec<String>>,
 ) -> Result<String, String> {
     let tool_path = get_uasset_tool_path(&app)?;
     let progress = TauriVfxProgressSink::new(&window);
 
-    step_pack_to_iostore(&tool_path, &usmap_path, &input_dir, &output_base, &progress).await
+    step_pack_to_iostore(
+        &tool_path,
+        &usmap_path,
+        &input_dir,
+        &output_base,
+        allowed_assets.as_deref(),
+        &progress,
+    )
+    .await
 }
 
 // ============================================================================

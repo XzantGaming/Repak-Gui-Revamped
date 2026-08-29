@@ -990,6 +990,17 @@ function App() {
     setContextMenu(null)
   }
 
+  // The details panel holds its own copy of the record, so a mod that leaves the list —
+  // bulk delete, a folder delete, or a deletion on disk — has to be dropped explicitly.
+  // Skipped mid-load: toggle and rename change a mod's path and re-point the panel
+  // themselves, and the list is briefly out of step with the selection while they do.
+  useEffect(() => {
+    if (isModsLoading || !selectedMod) return
+    if (!mods.some(m => m.path === selectedMod.path)) {
+      setSelectedMod(null)
+    }
+  }, [mods, selectedMod, isModsLoading])
+
   // Bulk Delete Handlers
   const handleBulkDelete = async () => {
     if (selectedMods.size === 0) return

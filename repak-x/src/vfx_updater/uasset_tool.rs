@@ -201,13 +201,13 @@ pub async fn extract_mod_assets(
         game_paks, mod_path, output_dir
     ));
 
-    // Mirrors the legacy CLI: `extract_iostore_legacy <game_paks> <output> --mod <mod>`.
+    // No deps: this pass defines what "the mod" is, and imports resolve in memory anyway.
     let request = VfxUatRequest {
         action: "extract_iostore_legacy",
         game_paks: Some(game_paks.to_string()),
         mod_path: Some(mod_path.to_string()),
         output_path: Some(output_dir.to_string()),
-        with_deps: Some(true),
+        with_deps: Some(false),
         ..Default::default()
     };
 
@@ -524,30 +524,39 @@ pub async fn extract_vanilla_assets(
         })
         .collect();
 
+    // The caller's patterns are extract-dir paths; the extractor filters on package paths.
+    let package_patterns: Vec<String> = normalized_patterns
+        .iter()
+        .map(|p| to_package_path(p))
+        .collect();
+
     vfx_debug(&format!(
         "extract_vanilla_assets\n  game_paks: {}\n  output_dir: {}\n  filter_patterns ({}):",
         game_paks,
         output_dir,
-        normalized_patterns.len()
+        package_patterns.len()
     ));
-    for (i, p) in normalized_patterns.iter().enumerate().take(20) {
+    for (i, p) in package_patterns.iter().enumerate().take(20) {
         vfx_debug(&format!("    [{}] {}", i, p));
     }
-    if normalized_patterns.len() > 20 {
+    if package_patterns.len() > 20 {
         vfx_debug(&format!(
             "    ... and {} more",
-            normalized_patterns.len() - 20
+            package_patterns.len() - 20
         ));
     }
 
     // Mirrors the legacy CLI `extract_iostore_legacy <game_paks> <output> --filter ...`,
     // passing the patterns inline (the JSON handler takes a `filter_patterns` list, so the
     // old temp-filter-file round-trip is no longer needed).
+    // Deps on: to_json pulls property schemas off referenced assets on disk (UAsset
+    // PullSchemasFromAnotherAsset), so imports missing from the tree degrade the JSON.
     let request = VfxUatRequest {
         action: "extract_iostore_legacy",
         game_paks: Some(game_paks.to_string()),
         output_path: Some(output_dir.to_string()),
-        filter_patterns: Some(normalized_patterns.clone()),
+        filter_patterns: Some(package_patterns),
+        with_deps: Some(true),
         ..Default::default()
     };
 
@@ -562,6 +571,65 @@ pub async fn extract_vanilla_assets(
     let mut assets = Vec::new();
     find_uassets_recursive(Path::new(output_dir), Path::new(output_dir), &mut assets)?;
 
+    if assets.is_empty() {
+        vfx_warn(&format!(
+            "Vanilla extraction matched none of the {} requested assets — the game has no counterpart for them, or the filter paths no longer match the tool's package paths",
+            normalized_patterns.len()
+        ));
+        return Ok(assets);
+    }
+
+    // The deps stay on disk for schema resolution but are not themselves converted:
+    // uasset_list.txt narrows the next step back down to the assets that were asked for.
+    let base = Path::new(output_dir);
+    let lowered_patterns: Vec<String> = normalized_patterns
+        .iter()
+        .map(|p| p.replace('\\', "/").to_lowercase())
+        .collect();
+
+    let mut requested = Vec::new();
+    let mut list_lines = Vec::new();
+    for asset in &assets {
+        let path = Path::new(asset);
+        let relative = path
+            .strip_prefix(base)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|_| asset.clone());
+
+        let lowered = relative.to_lowercase();
+        if !lowered_patterns.iter().any(|p| lowered.contains(p)) {
+            continue;
+        }
+
+        requested.push(asset.clone());
+        list_lines.push(
+            relative
+                .strip_suffix(".uasset")
+                .unwrap_or(&relative)
+                .to_string(),
+        );
+    }
+
+    let dependencies = assets.len() - requested.len();
+
+    if requested.is_empty() {
+        vfx_warn(&format!(
+            "No extracted vanilla asset matched a filter pattern ({} files extracted); converting all of them",
+            assets.len()
+        ));
+    } else {
+        list_lines.sort();
+        let list_path = Path::new(output_dir).join("uasset_list.txt");
+        let _ = fs::write(&list_path, list_lines.join("\n"));
+        vfx_info(&format!(
+            "Vanilla extract: {} requested assets, {} dependencies kept on disk for schema resolution",
+            requested.len(),
+            dependencies
+        ));
+    }
+
+    let assets = if requested.is_empty() { assets } else { requested };
+
     progress.emit(VfxPipelineProgress {
         stage: "Extract Vanilla Assets".to_string(),
         step: 4,
@@ -573,11 +641,93 @@ pub async fn extract_vanilla_assets(
     Ok(assets)
 }
 
+/// Extract-dir path back to the UE package path the extractor filters on — the inverse of
+/// the tool's ResolveGamePathToContent (`/Game/X` <-> `Marvel/Content/X`, other mounts as-is).
+fn to_package_path(relative_path: &str) -> String {
+    let p = relative_path.replace('\\', "/");
+    let p = p.trim_start_matches('/');
+    match p.strip_prefix("Marvel/Content/") {
+        Some(rest) => format!("/Game/{}", rest),
+        None => format!("/{}", p),
+    }
+}
+
+/// Comparison key for an asset: forward slashes, no extension, lowercased.
+fn asset_key(relative_path: &str) -> String {
+    let p = relative_path.replace('\\', "/");
+    let p = p.strip_suffix(".uasset").unwrap_or(&p);
+    p.trim_start_matches('/').to_lowercase()
+}
+
+/// Stage only `allowed` into a fresh dir — the packer packs whatever directory it is given.
+/// Returns (stage dir, kept, dropped).
+fn stage_allowed_assets(input_dir: &Path, allowed: &[String]) -> Result<(PathBuf, usize, usize), String> {
+    use std::collections::HashSet;
+
+    let wanted: HashSet<String> = allowed.iter().map(|p| asset_key(p)).collect();
+    let stage_dir = super::file_ops::create_step_directory("pack_stage")?;
+
+    let mut uasset_paths = Vec::new();
+    find_uasset_paths(input_dir, &mut uasset_paths)?;
+
+    let mut staged = 0usize;
+    let mut dropped = 0usize;
+
+    for asset in &uasset_paths {
+        let relative = asset
+            .strip_prefix(input_dir)
+            .map_err(|e| format!("[VFX] Failed to relativize {}: {}", asset.display(), e))?;
+
+        if !wanted.contains(&asset_key(&relative.to_string_lossy())) {
+            vfx_debug(&format!("Pack filter dropped: {}", relative.display()));
+            dropped += 1;
+            continue;
+        }
+
+        let dest = stage_dir.join(relative);
+        let dest_dir = dest
+            .parent()
+            .ok_or_else(|| format!("[VFX] No parent for {}", dest.display()))?;
+        fs::create_dir_all(dest_dir).map_err(|e| e.to_string())?;
+
+        // Stem plus a dot: keeps `Foo.m.ubulk`, leaves `Foo_01.uasset` alone.
+        let stem = asset
+            .file_stem()
+            .ok_or_else(|| format!("[VFX] No file stem for {}", asset.display()))?
+            .to_string_lossy()
+            .to_string();
+        let source_dir = asset
+            .parent()
+            .ok_or_else(|| format!("[VFX] No parent for {}", asset.display()))?;
+        let prefix = format!("{}.", stem);
+
+        for entry in fs::read_dir(source_dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.starts_with(&prefix) {
+                continue;
+            }
+            fs::copy(&path, dest_dir.join(&name))
+                .map_err(|e| format!("[VFX] Failed to stage {}: {}", path.display(), e))?;
+        }
+
+        staged += 1;
+    }
+
+    Ok((stage_dir, staged, dropped))
+}
+
+/// `allowed_assets`: the source mod's own assets, relative to the extract dir. Only these get packed.
 pub async fn pack_to_iostore(
     tool_path: &Path,
     usmap_path: &str,
     input_dir: &str,
     output_base: &str,
+    allowed_assets: Option<&[String]>,
     progress: &dyn VfxProgressSink,
 ) -> Result<String, String> {
     let output_base = if output_base.ends_with(".pak") {
@@ -596,16 +746,51 @@ pub async fn pack_to_iostore(
         message: format!("Creating: {}.utoc/.ucas/.pak", output_base),
     });
 
+    // Checked before the manifest, so an empty pipeline output is not reported as a
+    // manifest mismatch.
+    let mut input_assets = Vec::new();
+    find_uasset_paths(Path::new(input_dir), &mut input_assets)?;
+    if input_assets.is_empty() {
+        return Err(format!(
+            "[VFX] Nothing to pack: no .uasset files in {}",
+            input_dir
+        ));
+    }
+
+    // An empty manifest means "no manifest" — packing nothing is never the intent.
+    let pack_dir = match allowed_assets {
+        Some(allowed) if !allowed.is_empty() => {
+            let (stage_dir, staged, dropped) = stage_allowed_assets(Path::new(input_dir), allowed)?;
+            vfx_info(&format!(
+                "Pack manifest: {} of {} assets kept, {} left out (not in the source mod)",
+                staged,
+                staged + dropped,
+                dropped
+            ));
+            if staged == 0 {
+                return Err(
+                    "[VFX] No packable assets matched the source mod manifest".to_string()
+                );
+            }
+            stage_dir.to_string_lossy().to_string()
+        }
+        _ => {
+            vfx_warn("No source mod manifest supplied; packing the whole input directory");
+            input_dir.to_string()
+        }
+    };
+
     let mut uasset_files = Vec::new();
-    find_uasset_paths(Path::new(input_dir), &mut uasset_files)?;
+    find_uasset_paths(Path::new(&pack_dir), &mut uasset_files)?;
 
     if uasset_files.is_empty() {
         return Err("[VFX] No .uasset files found in input directory".to_string());
     }
 
     vfx_debug(&format!(
-        "pack_to_iostore\n  input_dir: {}\n  output_base: {}\n  usmap: {}\n  uasset_files: {}",
+        "pack_to_iostore\n  input_dir: {}\n  pack_dir: {}\n  output_base: {}\n  usmap: {}\n  uasset_files: {}",
         input_dir,
+        pack_dir,
         output_base,
         usmap_path,
         uasset_files.len()
@@ -625,7 +810,7 @@ pub async fn pack_to_iostore(
     let request = VfxUatRequest {
         action: "create_mod_iostore",
         output_path: Some(output_base.clone()),
-        input_dir: Some(input_dir.to_string()),
+        input_dir: Some(pack_dir.clone()),
         compress: Some(true),
         ..Default::default()
     };

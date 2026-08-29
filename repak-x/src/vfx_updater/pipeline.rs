@@ -93,16 +93,25 @@ pub async fn step_convert_json_to_uassets(
     convert_json_to_uassets(tool_path, usmap_path, input_dir, output_dir, progress).await
 }
 
-/// Step 8: Pack to IOStore bundle
+/// Step 8: Pack to IOStore bundle, limited to the source mod's own assets.
 pub async fn step_pack_to_iostore(
     tool_path: &Path,
     usmap_path: &str,
     input_dir: &str,
     output_base: &str,
+    allowed_assets: Option<&[String]>,
     progress: &dyn VfxProgressSink,
 ) -> Result<String, String> {
     vfx_info("=== Step 8: Pack to IOStore ===");
-    pack_to_iostore(tool_path, usmap_path, input_dir, output_base, progress).await
+    pack_to_iostore(
+        tool_path,
+        usmap_path,
+        input_dir,
+        output_base,
+        allowed_assets,
+        progress,
+    )
+    .await
 }
 
 /// Detect asset class for a single asset
